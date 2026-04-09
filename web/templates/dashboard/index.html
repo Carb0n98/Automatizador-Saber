@@ -5,9 +5,11 @@
 {% block page_subtitle %}Visão geral do sistema em tempo real{% endblock %}
 
 {% block topbar_actions %}
+  {% if current_user.has_perm('efetuar_busca') %}
   <button class="btn btn-primary" id="btnBuscar" onclick="iniciarBusca()">
     <i class="bi bi-search"></i> Buscar Agora
   </button>
+  {% endif %}
 {% endblock %}
 
 {% block extra_css %}
@@ -218,9 +220,11 @@
         <div class="card-title"><i class="bi bi-lightning-charge" style="color:var(--warning);margin-right:8px"></i>Ações Rápidas</div>
       </div>
       <div style="display:flex;flex-direction:column;gap:10px">
+        {% if current_user.has_perm('efetuar_busca') %}
         <button class="btn btn-primary w-100" id="btnBuscar2" onclick="iniciarBusca()">
           <i class="bi bi-search"></i> Buscar Verificações Agora
         </button>
+        {% endif %}
         {% if atrasados > 0 %}
         <a href="{{ url_for('verificacoes.index') }}?tab=atrasado" class="btn w-100"
            style="background:rgba(239,68,68,0.12);color:#fca5a5;border:1px solid rgba(239,68,68,0.25)">

@@ -1,8 +1,9 @@
 from flask import Blueprint, render_template, request, jsonify
-from flask_login import login_required
+from flask_login import login_required, current_user
 from ..models import Verificacao
 from ..extensions import db
 from datetime import datetime, date
+from ..utils import require_perm
 
 verificacoes_bp = Blueprint('verificacoes', __name__, url_prefix='/verificacoes')
 
@@ -19,6 +20,7 @@ def index():
     return render_template('verificacoes/index.html',
         active='verificacoes',
         cargos=cargos,
+        can_manage=current_user.has_perm('gerenciar_verificacoes'),
     )
 
 
@@ -86,8 +88,8 @@ def api_list():
 
 @verificacoes_bp.route('/<int:vid>/marcar-apto', methods=['POST'])
 @login_required
+@require_perm('gerenciar_verificacoes')
 def marcar_apto(vid):
-    # Fix #5: db.session.get() é o substituto correto para SQLAlchemy 2.x
     v = db.session.get(Verificacao, vid)
     if not v:
         return jsonify({'status': 'erro', 'mensagem': 'Registro não encontrado.'}), 404
@@ -98,11 +100,12 @@ def marcar_apto(vid):
 
 @verificacoes_bp.route('/<int:vid>/excluir', methods=['POST'])
 @login_required
+@require_perm('gerenciar_verificacoes')
 def excluir(vid):
-    # Fix #5: db.session.get() em vez de get_or_404 depreciado
     v = db.session.get(Verificacao, vid)
     if not v:
         return jsonify({'status': 'erro', 'mensagem': 'Registro não encontrado.'}), 404
     db.session.delete(v)
     db.session.commit()
     return jsonify({'status': 'ok', 'mensagem': 'Registro excluído.'})
+
