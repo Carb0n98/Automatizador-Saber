@@ -1,0 +1,312 @@
+{% extends "base.html" %}
+
+{% block title %}Configurações{% endblock %}
+{% block page_title %}Configurações{% endblock %}
+{% block page_subtitle %}Gerencie as credenciais e parâmetros do sistema SABER{% endblock %}
+
+{% block extra_css %}
+.settings-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  align-items: start;
+}
+
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.section-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 17px;
+  flex-shrink: 0;
+}
+.icon-purple { background: rgba(124,58,237,0.12); color: var(--primary-l); }
+.icon-green  { background: var(--success-bg);       color: var(--success); }
+.icon-amber  { background: var(--warning-bg);        color: var(--warning); }
+
+.section-title { font-size: 15px; font-weight: 700; color: var(--text); }
+.section-sub   { font-size: 12px; color: var(--text-m); margin-top: 2px; }
+
+.pw-wrap { position: relative; }
+.pw-wrap input { padding-right: 44px; }
+.pw-toggle {
+  position: absolute;
+  right: 12px; top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--text-d);
+  cursor: pointer;
+  font-size: 15px;
+  padding: 4px;
+  transition: color 0.15s;
+  line-height: 1;
+}
+.pw-toggle:hover { color: var(--text-m); }
+
+.info-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 14px;
+  background: var(--info-bg);
+  border: 1px solid rgba(56,189,248,0.2);
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  color: #7dd3fc;
+}
+
+.save-bar {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.save-bar p { font-size: 13px; color: var(--text-m); }
+
+@media (max-width: 900px) {
+  .settings-grid { grid-template-columns: 1fr; }
+}
+{% endblock %}
+
+{% block content %}
+
+<form id="configForm">
+<div class="settings-grid">
+
+  <!-- Left column -->
+  <div class="settings-section">
+
+    <!-- SABER Connection -->
+    <div class="card">
+      <div class="section-header">
+        <div class="section-icon icon-purple"><i class="bi bi-globe2"></i></div>
+        <div>
+          <div class="section-title">Conexão SABER</div>
+          <div class="section-sub">URL e credenciais de acesso ao sistema externo</div>
+        </div>
+      </div>
+      <hr style="border:none;border-top:1px solid var(--border);margin:16px 0"/>
+
+      <div class="form-group">
+        <label for="saber_url">URL do Sistema</label>
+        <input type="text" id="saber_url" name="saber_url"
+               value="{{ config.saber_url }}"
+               placeholder="https://adtalento.com/websiteSaber"/>
+      </div>
+
+      <div class="form-group">
+        <label for="saber_usuario">Usuário</label>
+        <input type="text" id="saber_usuario" name="saber_usuario"
+               value="{{ config.saber_usuario }}"
+               placeholder="Ex: 60010603" autocomplete="off"/>
+      </div>
+
+      <div class="form-group" style="margin-bottom:0">
+        <label for="saber_senha">Senha</label>
+        <div class="pw-wrap">
+          <input type="password" id="saber_senha" name="saber_senha"
+                 value="{{ config.saber_senha }}"
+                 placeholder="••••••••" autocomplete="new-password"/>
+          <button type="button" class="pw-toggle" data-target="saber_senha">
+            <i class="bi bi-eye"></i>
+          </button>
+        </div>
+      </div>
+
+      <div class="info-row mt-16">
+        <i class="bi bi-info-circle" style="flex-shrink:0;margin-top:1px"></i>
+        <span>Suas credenciais são armazenadas localmente apenas no banco de dados desta aplicação.</span>
+      </div>
+
+      <div style="margin-top:16px">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="testarConexao()">
+          <i class="bi bi-wifi"></i> Testar Conexão
+        </button>
+      </div>
+    </div>
+
+    <!-- Automation -->
+    <div class="card">
+      <div class="section-header">
+        <div class="section-icon icon-amber"><i class="bi bi-robot"></i></div>
+        <div>
+          <div class="section-title">Automação</div>
+          <div class="section-sub">Configurações do restaurante e filtros</div>
+        </div>
+      </div>
+      <hr style="border:none;border-top:1px solid var(--border);margin:16px 0"/>
+
+      <div class="form-group" style="margin-bottom:0">
+        <label for="restaurante">Código do Restaurante</label>
+        <input type="text" id="restaurante" name="restaurante"
+               value="{{ config.restaurante }}"
+               placeholder="Ex: NPN"/>
+        <div style="font-size:11.5px;color:var(--text-d);margin-top:6px">
+          <i class="bi bi-info-circle"></i>
+          O mês é obtido automaticamente (mês atual).
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Right column -->
+  <div class="settings-section">
+
+    <!-- Scheduler info -->
+    <div class="card" style="background:linear-gradient(135deg,rgba(124,58,237,0.07),rgba(79,70,229,0.05));border-color:rgba(124,58,237,0.18)">
+      <div class="section-header">
+        <div class="section-icon icon-purple"><i class="bi bi-clock-history"></i></div>
+        <div>
+          <div class="section-title">Agendamento</div>
+          <div class="section-sub">Execução automática configurada</div>
+        </div>
+      </div>
+      <hr style="border:none;border-top:1px solid rgba(124,58,237,0.2);margin:16px 0"/>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <span style="font-size:13px;color:var(--text-m)">Horário de execução</span>
+          <span class="badge badge-purple"><i class="bi bi-clock"></i> 07:00 diariamente</span>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <span style="font-size:13px;color:var(--text-m)">Fuso horário</span>
+          <span style="font-size:13px;font-weight:600;color:var(--text)">America/Sao_Paulo</span>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <span style="font-size:13px;color:var(--text-m)">Modo de execução</span>
+          <span class="badge badge-info"><i class="bi bi-eye-slash"></i> Headless</span>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <span style="font-size:13px;color:var(--text-m)">Deduplicação</span>
+          <span class="badge badge-success"><i class="bi bi-check-circle"></i> Ativa</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Notifications -->
+    <div class="card">
+      <div class="section-header">
+        <div class="section-icon icon-green"><i class="bi bi-whatsapp"></i></div>
+        <div>
+          <div class="section-title">Notificações</div>
+          <div class="section-sub">Número para envio de relatórios via WhatsApp</div>
+        </div>
+      </div>
+      <hr style="border:none;border-top:1px solid var(--border);margin:16px 0"/>
+
+      <div class="form-group" style="margin-bottom:0">
+        <label for="telefone">Número WhatsApp</label>
+        <input type="text" id="telefone" name="telefone"
+               value="{{ config.telefone }}"
+               placeholder="+5584991021240"/>
+        <div style="font-size:11.5px;color:var(--text-d);margin-top:6px">
+          <i class="bi bi-info-circle"></i>
+          Formato internacional com DDI. Ex: +5511999999999
+        </div>
+      </div>
+    </div>
+
+    <!-- Security info -->
+    <div class="card" style="background:rgba(16,185,129,0.04);border-color:rgba(16,185,129,0.15)">
+      <div style="display:flex;align-items:flex-start;gap:12px">
+        <i class="bi bi-shield-lock" style="font-size:20px;color:var(--success);flex-shrink:0;margin-top:2px"></i>
+        <div>
+          <div style="font-size:13.5px;font-weight:600;color:var(--text);margin-bottom:6px">Segurança</div>
+          <div style="font-size:12.5px;color:var(--text-m);line-height:1.7">
+            As configurações são armazenadas em banco de dados local (SQLite).<br>
+            Nenhuma informação é enviada para servidores externos.<br>
+            O sistema roda inteiramente em sua máquina local.
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Save bar -->
+<div class="save-bar">
+  <p><i class="bi bi-info-circle"></i> As alterações só terão efeito na próxima execução do sistema.</p>
+  <div style="display:flex;gap:10px">
+    <button type="button" class="btn btn-ghost" onclick="location.reload()">
+      <i class="bi bi-arrow-counterclockwise"></i> Descartar
+    </button>
+    <button type="button" class="btn btn-primary" id="btnSalvar" onclick="salvarConfigs()">
+      <i class="bi bi-floppy2"></i> Salvar Configurações
+    </button>
+  </div>
+</div>
+</form>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Toggle password visibility
+document.querySelectorAll('.pw-toggle').forEach(btn => {
+  btn.addEventListener('click', function() {
+    const inp = document.getElementById(this.dataset.target);
+    const icon = this.querySelector('i');
+    if (inp.type === 'password') {
+      inp.type = 'text';
+      icon.className = 'bi bi-eye-slash';
+    } else {
+      inp.type = 'password';
+      icon.className = 'bi bi-eye';
+    }
+  });
+});
+
+async function salvarConfigs() {
+  const btn = document.getElementById('btnSalvar');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Salvando...';
+
+  const form = document.getElementById('configForm');
+  const data = new FormData(form);
+
+  try {
+    const r = await fetch('/configuracoes/salvar', {method: 'POST', body: data});
+    const result = await r.json();
+    showToast(result.mensagem || 'Configurações salvas!', r.ok ? 'success' : 'error');
+  } catch(e) {
+    showToast('Erro ao salvar: ' + e.message, 'error');
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = '<i class="bi bi-floppy2"></i> Salvar Configurações';
+}
+
+async function testarConexao() {
+  showToast('Testando conexão com o SABER...', 'info', 2000);
+  try {
+    const r = await fetch('/configuracoes/api/testar', {method: 'POST'});
+    const data = await r.json();
+    showToast(data.mensagem, data.status === 'ok' ? 'success' : 'error');
+  } catch(e) {
+    showToast('Erro: ' + e.message, 'error');
+  }
+}
+</script>
+{% endblock %}

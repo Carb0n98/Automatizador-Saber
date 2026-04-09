@@ -1,0 +1,49 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Local database (will be in Docker volume)
+*.db
+*.sqlite
+*.sqlite3
+instance/
+
+# Environment variables (never commit!)
+.env
+.env.local
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+README.md
+*.md
+
+# Test files
+tests/
+test_*.py
+
+# Node (if any)
+node_modules/

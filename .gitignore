@@ -1,0 +1,50 @@
+# ── Segurança ─────────────────────────────────────────────
+# Nunca suba arquivos com senhas ou chaves!
+.env
+.env.local
+.env.*.local
+
+# ── Banco de dados local ───────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+instance/
+
+# ── Python cache ───────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+eggs/
+*.egg
+
+# ── Virtual environments ───────────────────────────────────
+venv/
+.venv/
+env/
+ENV/
+
+# ── IDE / Editor ───────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── Sistema operacional ────────────────────────────────────
+.DS_Store
+.DS_Store?
+Thumbs.db
+desktop.ini
+
+# ── Logs ───────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Selenium / Chrome ──────────────────────────────────────
+chromedriver
+chromedriver.exe

@@ -1,0 +1,394 @@
+{% extends "base.html" %}
+
+{% block title %}Verificações{% endblock %}
+{% block page_title %}Verificações{% endblock %}
+{% block page_subtitle %}Todas as verificações coletadas do sistema SABER{% endblock %}
+
+{% block topbar_actions %}
+  <div style="font-size:12.5px;color:var(--text-m)" id="tableInfo">Carregando...</div>
+{% endblock %}
+
+{% block extra_css %}
+.filters-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+}
+
+.filters-bar input, .filters-bar select {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  padding: 8px 12px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.filters-bar input:focus, .filters-bar select:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(124,58,237,0.12);
+}
+
+.search-input-wrap { position: relative; flex: 1; min-width: 200px; }
+.search-input-wrap i { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--text-d); font-size: 14px; }
+.search-input-wrap input { width: 100%; padding-left: 34px; }
+
+.tab-btns {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.tab-btn {
+  padding: 7px 16px;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-m);
+  font-family: 'Inter', sans-serif;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tab-btn:hover { background: var(--surface-2); color: var(--text); border-color: var(--border-h); }
+
+.tab-btn.active {
+  background: rgba(124,58,237,0.15);
+  color: var(--primary-l);
+  border-color: rgba(124,58,237,0.3);
+}
+
+.loading-row td {
+  text-align: center;
+  padding: 40px !important;
+  color: var(--text-d);
+}
+
+.action-btns { display: flex; gap: 6px; }
+
+.nome-cell { font-weight: 600; }
+.cargo-cell { color: var(--text-m); font-size: 12.5px; }
+{% endblock %}
+
+{% block content %}
+
+<!-- Tabs -->
+<div class="tab-btns">
+  <button class="tab-btn active" id="tabTodos" onclick="setTab('')">
+    <i class="bi bi-list-ul"></i> Todos
+  </button>
+  <button class="tab-btn" id="tabPendentes" onclick="setTab('pendente')">
+    <i class="bi bi-hourglass-split"></i> Pendentes
+  </button>
+  <button class="tab-btn" id="tabAtrasados" onclick="setTab('atrasado')"
+    style="--tab-danger:rgba(239,68,68,0.15)">
+    <i class="bi bi-exclamation-triangle"></i> Atrasados
+  </button>
+  <button class="tab-btn" id="tabAptos" onclick="setTab('apto')">
+    <i class="bi bi-check-circle"></i> Aptos
+  </button>
+</div>
+
+<!-- Filters -->
+<div class="filters-bar">
+  <div class="search-input-wrap">
+    <i class="bi bi-search"></i>
+    <input type="text" id="searchNome" placeholder="Buscar por nome..." oninput="debounceLoad()"/>
+  </div>
+
+  <select id="filterCargo" onchange="loadData()">
+    <option value="">Todos os cargos</option>
+    {% for c in cargos %}
+      <option value="{{ c }}">{{ c }}</option>
+    {% endfor %}
+  </select>
+
+  <input type="date" id="filterDe" onchange="loadData()" title="Data de"/>
+  <input type="date" id="filterAte" onchange="loadData()" title="Data até"/>
+
+  <button class="btn btn-ghost btn-sm" onclick="limparFiltros()">
+    <i class="bi bi-x-circle"></i> Limpar
+  </button>
+</div>
+
+<!-- Table Card -->
+<div class="card" style="padding:0">
+  <div class="table-wrapper">
+    <table id="mainTable">
+      <thead>
+        <tr>
+          <th>Nome</th>
+          <th>Cargo</th>
+          <th>Atividade</th>
+          <th>Data</th>
+          <th>Status</th>
+          <th>Origem</th>
+          <th>Ações</th>
+        </tr>
+      </thead>
+      <tbody id="tableBody">
+        <tr class="loading-row">
+          <td colspan="7">
+            <span class="spinner" style="border-color:rgba(124,58,237,0.3);border-top-color:var(--primary)"></span>
+            <span style="margin-left:10px">Carregando...</span>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="pagination" id="paginationWrap"></div>
+</div>
+
+<!-- Confirm modal -->
+<div class="modal-overlay" id="confirmModal">
+  <div class="modal-box">
+    <div class="modal-header">
+      <span class="modal-title" id="modalTitle">Confirmar ação</span>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <p id="modalBody" style="color:var(--text-m);font-size:13.5px;margin-bottom:24px"></p>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" id="modalConfirm">Confirmar</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let currentPage = 1;
+let currentStatus = '';
+let debounceTimer;
+let pendingAction = null;
+
+function debounceLoad() {
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(loadData, 350);
+}
+
+function setTab(status) {
+  currentStatus = status;
+  currentPage = 1;
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    b.classList.remove('active');
+    b.style.background = '';
+    b.style.color = '';
+    b.style.borderColor = '';
+  });
+  const map = {
+    '':         'tabTodos',
+    'pendente': 'tabPendentes',
+    'atrasado': 'tabAtrasados',
+    'apto':     'tabAptos'
+  };
+  const btn = document.getElementById(map[status]);
+  if (btn) {
+    btn.classList.add('active');
+    // Aba atrasados fica vermelha quando ativa
+    if (status === 'atrasado') {
+      btn.style.background = 'rgba(239,68,68,0.15)';
+      btn.style.color = '#fca5a5';
+      btn.style.borderColor = 'rgba(239,68,68,0.35)';
+    }
+  }
+  loadData();
+}
+
+function limparFiltros() {
+  document.getElementById('searchNome').value = '';
+  document.getElementById('filterCargo').value = '';
+  document.getElementById('filterDe').value = '';
+  document.getElementById('filterAte').value = '';
+  loadData();
+}
+
+async function loadData() {
+  const q = document.getElementById('searchNome').value;
+  const cargo = document.getElementById('filterCargo').value;
+  const de = document.getElementById('filterDe').value;
+  const ate = document.getElementById('filterAte').value;
+
+  const params = new URLSearchParams({
+    q, cargo, status: currentStatus,
+    data_de: de, data_ate: ate,
+    page: currentPage, per_page: 20
+  });
+
+  document.getElementById('tableBody').innerHTML = `
+    <tr class="loading-row"><td colspan="7">
+      <span class="spinner" style="border-color:rgba(124,58,237,0.3);border-top-color:var(--primary)"></span>
+      <span style="margin-left:10px">Carregando...</span>
+    </td></tr>`;
+
+  // Fix #13: try/catch para falha de rede
+  try {
+    const r = await fetch('/verificacoes/api?' + params);
+    if (!r.ok) throw new Error(`Erro ${r.status}`);
+    const data = await r.json();
+    document.getElementById('tableInfo').textContent = `${data.total} registro(s) encontrado(s)`;
+    renderTable(data.data);
+    renderPagination(data.page, data.pages, data.total);
+  } catch (e) {
+    document.getElementById('tableInfo').textContent = 'Erro ao carregar.';
+    document.getElementById('tableBody').innerHTML = `<tr><td colspan="7">
+      <div class="empty-state">
+        <i class="bi bi-wifi-off"></i>
+        <h3>Falha na conexão</h3>
+        <p>Não foi possível carregar os dados. Verifique se o servidor está ativo.</p>
+        <button class="btn btn-ghost" style="margin-top:12px" onclick="loadData()">
+          <i class="bi bi-arrow-clockwise"></i> Tentar novamente
+        </button>
+      </div>
+    </td></tr>`;
+  }
+}
+
+const statusBadge = {
+  'pendente': '<span class="badge badge-warning"><i class="bi bi-hourglass-split"></i> Pendente</span>',
+  'apto':     '<span class="badge badge-success"><i class="bi bi-check-circle"></i> Apto</span>',
+};
+
+const origemBadge = {
+  'manual':    '<span class="badge badge-purple" style="font-size:10px">Manual</span>',
+  'automatico':'<span class="badge badge-info" style="font-size:10px"><i class="bi bi-robot"></i> Auto</span>',
+};
+
+function renderTable(rows) {
+  const tbody = document.getElementById('tableBody');
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="7">
+      <div class="empty-state">
+        <i class="bi bi-inbox"></i>
+        <h3>Nenhum registro encontrado</h3>
+        <p>Tente ajustar os filtros ou realize uma nova busca.</p>
+      </div>
+    </td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = rows.map(v => `
+    <tr>
+      <td><span class="nome-cell">${escHtml(v.nome)}</span></td>
+      <td><span class="cargo-cell">${escHtml(v.cargo || '—')}</span></td>
+      <td style="max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escHtml(v.atividade || '')}">${escHtml(v.atividade || '—')}</td>
+      <td style="white-space:nowrap">${v.data_verificacao || '—'}</td>
+      <td>${statusBadge[v.status] || v.status}</td>
+      <td>${origemBadge[v.origem] || v.origem}</td>
+      <td>
+        <div class="action-btns">
+          ${v.status !== 'apto' ? `
+          <button class="btn btn-success btn-icon btn-sm" title="Marcar como Apto"
+            onclick="confirmarAcao('apto', ${v.id}, '${escHtml(v.nome)}')">
+            <i class="bi bi-check-lg"></i>
+          </button>` : ''}
+          <button class="btn btn-danger btn-icon btn-sm" title="Excluir"
+            onclick="confirmarAcao('excluir', ${v.id}, '${escHtml(v.nome)}')">
+            <i class="bi bi-trash3"></i>
+          </button>
+        </div>
+      </td>
+    </tr>`).join('');
+}
+
+function renderPagination(page, pages, total) {
+  const wrap = document.getElementById('paginationWrap');
+  if (pages <= 1) { wrap.innerHTML = ''; return; }
+
+  let html = `<button class="page-btn" onclick="goPage(${page-1})" ${page<=1?'disabled':''}>
+    <i class="bi bi-chevron-left"></i></button>`;
+
+  for (let i = Math.max(1, page-2); i <= Math.min(pages, page+2); i++) {
+    html += `<button class="page-btn ${i===page?'active':''}" onclick="goPage(${i})">${i}</button>`;
+  }
+
+  html += `<button class="page-btn" onclick="goPage(${page+1})" ${page>=pages?'disabled':''}>
+    <i class="bi bi-chevron-right"></i></button>`;
+
+  wrap.innerHTML = html;
+}
+
+function goPage(p) {
+  currentPage = p;
+  loadData();
+}
+
+function confirmarAcao(tipo, id, nome) {
+  pendingAction = {tipo, id};
+  const modal = document.getElementById('confirmModal');
+  const btn = document.getElementById('modalConfirm');
+
+  if (tipo === 'apto') {
+    document.getElementById('modalTitle').textContent = 'Marcar como Apto';
+    document.getElementById('modalBody').textContent = `Deseja marcar "${nome}" como APTO?`;
+    btn.className = 'btn btn-success';
+    btn.textContent = 'Marcar como Apto';
+  } else {
+    document.getElementById('modalTitle').textContent = 'Excluir Registro';
+    document.getElementById('modalBody').textContent = `Tem certeza que deseja excluir "${nome}"? Esta ação não pode ser desfeita.`;
+    btn.className = 'btn btn-danger';
+    btn.textContent = 'Excluir';
+  }
+
+  btn.onclick = executarAcao;
+  modal.classList.add('show');
+}
+
+function closeModal() {
+  document.getElementById('confirmModal').classList.remove('show');
+  pendingAction = null;
+}
+
+async function executarAcao() {
+  if (!pendingAction) return;
+  const {tipo, id} = pendingAction;
+  closeModal();
+
+  const url = tipo === 'apto'
+    ? `/verificacoes/${id}/marcar-apto`
+    : `/verificacoes/${id}/excluir`;
+
+  // Fix #12: verificar r.ok antes de processar resposta
+  try {
+    const r = await fetch(url, {method: 'POST'});
+    const data = await r.json();
+    if (r.ok) {
+      showToast(data.mensagem, 'success');
+    } else {
+      showToast(data.mensagem || data.error || 'Erro ao executar ação.', 'error');
+    }
+    loadData();
+  } catch (e) {
+    showToast('Erro de conexão: ' + e.message, 'error');
+  }
+}
+
+function escHtml(str) {
+  if (!str) return '';
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Close modal on overlay click
+document.getElementById('confirmModal').addEventListener('click', function(e) {
+  if (e.target === this) closeModal();
+});
+
+// On load: check URL ?tab= param (e.g. from dashboard shortcut)
+const urlTab = new URLSearchParams(window.location.search).get('tab') || '';
+setTab(urlTab);
+</script>
+{% endblock %}

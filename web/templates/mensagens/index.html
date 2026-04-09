@@ -1,0 +1,469 @@
+{% extends "base.html" %}
+
+{% block title %}Mensagens{% endblock %}
+{% block page_title %}Gerenciador de Mensagens{% endblock %}
+{% block page_subtitle %}Crie e gerencie templates de mensagens com variáveis dinâmicas{% endblock %}
+
+{% block topbar_actions %}
+  <button class="btn btn-primary" onclick="abrirModal()">
+    <i class="bi bi-plus-lg"></i> Novo Template
+  </button>
+{% endblock %}
+
+{% block extra_css %}
+.templates-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 16px;
+}
+
+.template-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+  position: relative;
+  overflow: hidden;
+}
+
+.template-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--primary), var(--accent));
+}
+
+.template-card:hover {
+  border-color: var(--border-h);
+  box-shadow: var(--shadow);
+  transform: translateY(-2px);
+}
+
+.template-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+
+.template-title {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--text);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.template-body {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  font-size: 12.5px;
+  color: var(--text-m);
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 120px;
+  overflow: hidden;
+  position: relative;
+}
+
+.template-body::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 32px;
+  background: linear-gradient(transparent, var(--surface-2));
+}
+
+.template-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.template-actions { display: flex; gap: 6px; }
+
+/* Variable chips */
+.vars-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.var-chip {
+  background: rgba(124,58,237,0.12);
+  color: var(--primary-l);
+  border: 1px solid rgba(124,58,237,0.2);
+  border-radius: 4px;
+  padding: 2px 7px;
+  font-size: 11.5px;
+  font-family: 'Courier New', monospace;
+  font-weight: 600;
+}
+
+/* Preview section */
+.preview-box {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  font-size: 13px;
+  color: var(--text-m);
+  white-space: pre-wrap;
+  line-height: 1.8;
+  min-height: 80px;
+  word-break: break-word;
+}
+
+.copy-btn-wrap {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+/* Platforms */
+.platform-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.platform-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-m);
+  font-size: 12.5px;
+  font-weight: 500;
+  font-family: 'Inter', sans-serif;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.platform-btn:hover { background: var(--surface-3); color: var(--text); border-color: var(--border-h); }
+.platform-btn.whatsapp:hover { background: rgba(37,211,102,0.1); color: #25d366; border-color: rgba(37,211,102,0.3); }
+.platform-btn.discord:hover  { background: rgba(88,101,242,0.1); color: #5865f2; border-color: rgba(88,101,242,0.3); }
+{% endblock %}
+
+{% block content %}
+
+<!-- Variable reference -->
+<div class="card mb-20" style="padding:16px 20px;background:rgba(124,58,237,0.06);border-color:rgba(124,58,237,0.2)">
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <span style="font-size:12.5px;font-weight:600;color:var(--primary-l)"><i class="bi bi-braces"></i> Variáveis disponíveis:</span>
+    <div class="vars-info" style="margin-bottom:0">
+      <span class="var-chip">{nome}</span>
+      <span class="var-chip">{cargo}</span>
+      <span class="var-chip">{data}</span>
+      <span class="var-chip">{atividade}</span>
+      <span class="var-chip">{status}</span>
+    </div>
+    <span style="font-size:12px;color:var(--text-d);margin-left:auto">Use estas variáveis no conteúdo; elas serão substituídas ao copiar.</span>
+  </div>
+</div>
+
+<!-- Resumo Diário Automático -->
+<div class="card mb-20" style="border-left: 4px solid var(--warning)">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+    <div style="display:flex;align-items:center;gap:10px">
+      <i class="bi bi-list-check" style="font-size:20px;color:var(--warning)"></i>
+      <div>
+        <h4 style="margin:0;font-size:15px;color:var(--text);font-weight:600">Lista Diária (Atrasados e Hoje)</h4>
+        <div style="font-size:12px;color:var(--text-m);font-weight:400;margin-top:2px">Relatório gerado automaticamente para enviar no grupo/equipe</div>
+      </div>
+    </div>
+    <div class="platform-btns" style="margin-top:0">
+      <button class="platform-btn whatsapp" onclick="copiarResumo()" style="padding:6px 12px;font-size:12px">
+        <i class="bi bi-whatsapp"></i> Copiar Resumo
+      </button>
+    </div>
+  </div>
+  <div class="preview-box" id="resumoBox">{{ resumo_texto }}</div>
+</div>
+
+<h4 style="margin-top:28px;margin-bottom:16px;font-size:15px;color:var(--text);font-weight:600;display:flex;align-items:center;gap:8px">
+  <i class="bi bi-grid"></i> Seus Templates Personalizados
+</h4>
+
+<!-- Templates grid -->
+<div class="templates-grid" id="templatesGrid">
+  {% if templates %}
+    {% for t in templates %}
+    <div class="template-card" id="card-{{ t.id }}" data-conteudo="{{ t.conteudo | e }}">
+      <div class="template-header">
+        <div class="template-icon" style="width:34px;height:34px;background:rgba(124,58,237,0.12);border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+          <i class="bi bi-chat-quote" style="color:var(--primary-l)"></i>
+        </div>
+        <div class="template-title">{{ t.titulo }}</div>
+      </div>
+
+      <div class="template-body">{{ t.conteudo }}</div>
+
+      <div class="template-footer">
+        <span style="font-size:11px;color:var(--text-d)">
+          <i class="bi bi-clock"></i> {{ t.criado_em.strftime('%d/%m/%Y') if t.criado_em }}
+        </span>
+        <div class="template-actions">
+          <button class="btn btn-ghost btn-icon btn-sm" title="Copiar mensagem"
+            onclick="copiarTemplate({{ t.id }})">
+            <i class="bi bi-clipboard"></i>
+          </button>
+          <button class="btn btn-ghost btn-icon btn-sm" title="Editar"
+            onclick="editarTemplate({{ t.id }}, '{{ t.titulo | e }}', `{{ t.conteudo | e }}`)">
+            <i class="bi bi-pencil"></i>
+          </button>
+          <button class="btn btn-danger btn-icon btn-sm" title="Excluir"
+            onclick="excluirTemplate({{ t.id }}, '{{ t.titulo | e }}')">
+            <i class="bi bi-trash3"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  {% else %}
+    <div style="grid-column:1/-1">
+      <div class="empty-state card">
+        <i class="bi bi-chat-dots"></i>
+        <h3>Nenhum template criado</h3>
+        <p>Crie um template de mensagem para envio via WhatsApp, Discord e outras plataformas.</p>
+        <button class="btn btn-primary" style="margin-top:16px" onclick="abrirModal()">
+          <i class="bi bi-plus-lg"></i> Criar Primeiro Template
+        </button>
+      </div>
+    </div>
+  {% endif %}
+</div>
+
+<!-- Create/Edit Modal -->
+<div class="modal-overlay" id="templateModal">
+  <div class="modal-box" style="max-width:600px">
+    <div class="modal-header">
+      <span class="modal-title" id="modalTitle">Novo Template</span>
+      <button class="modal-close" onclick="fecharModal()">&times;</button>
+    </div>
+
+    <div class="form-group">
+      <label for="inputTitulo">Título do Template</label>
+      <input type="text" id="inputTitulo" placeholder="Ex: Lembrete de Treinamento"/>
+    </div>
+
+    <div class="form-group">
+      <label for="inputConteudo">
+        Conteúdo da Mensagem
+        <span style="color:var(--text-d);font-weight:400"> — use {nome}, {cargo}, {data}...</span>
+      </label>
+      <textarea id="inputConteudo" placeholder="Olá {nome}, seu treinamento de {cargo} está previsto para {data}..." rows="6" oninput="atualizarPreview()"></textarea>
+    </div>
+
+    <div class="form-group">
+      <label>Preview <span style="color:var(--text-d);font-weight:400">(com dados de exemplo)</span></label>
+      <div class="preview-box" id="previewBox">—</div>
+      <div class="copy-btn-wrap">
+        <button class="btn btn-ghost btn-sm" onclick="copiarPreview()">
+          <i class="bi bi-clipboard"></i> Copiar preview
+        </button>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px">
+      <button class="btn btn-ghost" onclick="fecharModal()">Cancelar</button>
+      <button class="btn btn-primary" id="btnSalvar" onclick="salvarTemplate()">
+        <i class="bi bi-floppy2"></i> Salvar Template
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Copy modal -->
+<div class="modal-overlay" id="copyModal">
+  <div class="modal-box" style="max-width:580px">
+    <div class="modal-header">
+      <span class="modal-title">Copiar Mensagem</span>
+      <button class="modal-close" onclick="fecharCopyModal()">&times;</button>
+    </div>
+
+    <p style="font-size:13px;color:var(--text-m);margin-bottom:20px">
+      Preencha as variáveis abaixo para personalizar a mensagem antes de copiar.
+    </p>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px" id="copyVarsForm">
+      <div class="form-group"><label>Nome</label><input type="text" id="cv_nome" placeholder="João Silva"/></div>
+      <div class="form-group"><label>Cargo</label><input type="text" id="cv_cargo" placeholder="Cozinheiro"/></div>
+      <div class="form-group"><label>Data</label><input type="text" id="cv_data" placeholder="06/04/2025"/></div>
+      <div class="form-group"><label>Atividade</label><input type="text" id="cv_atividade" placeholder="Higiene Alimentar"/></div>
+      <div class="form-group"><label>Status</label><input type="text" id="cv_status" placeholder="Pendente"/></div>
+    </div>
+
+    <div class="form-group">
+      <label>Mensagem Final</label>
+      <div class="preview-box" id="copyPreviewBox">—</div>
+    </div>
+
+    <div class="platform-btns">
+      <button class="platform-btn whatsapp" onclick="copiarParaClipboard()">
+        <i class="bi bi-whatsapp"></i> Copiar para WhatsApp
+      </button>
+      <button class="platform-btn discord" onclick="copiarParaClipboard()">
+        <i class="bi bi-discord"></i> Copiar para Discord
+      </button>
+      <button class="platform-btn" onclick="copiarParaClipboard()">
+        <i class="bi bi-clipboard"></i> Copiar
+      </button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let editingId = null;
+let copyConteudo = '';
+
+const exemplos = {
+  nome: 'João Silva', cargo: 'Cozinheiro', data: '06/04/2025',
+  atividade: 'Higiene Alimentar', status: 'Pendente'
+};
+
+function substituirVars(texto, vars) {
+  return texto.replace(/\{(\w+)\}/g, (m, k) => vars[k] !== undefined ? vars[k] : m);
+}
+
+// ── Create/Edit Modal ──
+function abrirModal(id = null, titulo = '', conteudo = '') {
+  editingId = id;
+  document.getElementById('modalTitle').textContent = id ? 'Editar Template' : 'Novo Template';
+  document.getElementById('inputTitulo').value = titulo;
+  document.getElementById('inputConteudo').value = conteudo;
+  atualizarPreview();
+  document.getElementById('templateModal').classList.add('show');
+  document.getElementById('inputTitulo').focus();
+}
+
+function fecharModal() {
+  editingId = null;
+  document.getElementById('templateModal').classList.remove('show');
+}
+
+function editarTemplate(id, titulo, conteudo) {
+  abrirModal(id, titulo, conteudo.replace(/\\n/g, '\n'));
+}
+
+function atualizarPreview() {
+  const txt = document.getElementById('inputConteudo').value;
+  document.getElementById('previewBox').textContent = substituirVars(txt, exemplos) || '—';
+}
+
+function copiarPreview() {
+  const txt = document.getElementById('previewBox').textContent;
+  navigator.clipboard.writeText(txt).then(() => showToast('Preview copiado!', 'success'));
+}
+
+async function salvarTemplate() {
+  const titulo = document.getElementById('inputTitulo').value.trim();
+  const conteudo = document.getElementById('inputConteudo').value.trim();
+
+  if (!titulo || !conteudo) { showToast('Título e conteúdo são obrigatórios.', 'warning'); return; }
+
+  const method = editingId ? 'PUT' : 'POST';
+  const url = editingId ? `/mensagens/api/${editingId}` : '/mensagens/api';
+
+  const btn = document.getElementById('btnSalvar');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Salvando...';
+
+  try {
+    const r = await fetch(url, {
+      method,
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({titulo, conteudo})
+    });
+
+    if (r.ok) {
+      showToast('Template salvo com sucesso!', 'success');
+      fecharModal();
+      setTimeout(() => location.reload(), 800);
+    } else {
+      const e = await r.json();
+      showToast(e.error || 'Erro ao salvar.', 'error');
+    }
+  } catch(e) {
+    showToast('Erro: ' + e.message, 'error');
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = '<i class="bi bi-floppy2"></i> Salvar Template';
+}
+
+async function excluirTemplate(id, titulo) {
+  if (!confirm(`Excluir o template "${titulo}"?`)) return;
+  const r = await fetch(`/mensagens/api/${id}`, {method: 'DELETE'});
+  if (r.ok) {
+    showToast('Template excluído.', 'success');
+    document.getElementById(`card-${id}`)?.remove();
+  }
+}
+
+// ── Copy Modal ──
+function copiarTemplate(id) {
+  const card = document.getElementById(`card-${id}`);
+  copyConteudo = card ? card.dataset.conteudo : '';
+  atualizarCopyPreview();
+  document.getElementById('copyModal').classList.add('show');
+}
+
+function fecharCopyModal() {
+  document.getElementById('copyModal').classList.remove('show');
+}
+
+function atualizarCopyPreview() {
+  const vars = {
+    nome: document.getElementById('cv_nome').value || exemplos.nome,
+    cargo: document.getElementById('cv_cargo').value || exemplos.cargo,
+    data: document.getElementById('cv_data').value || exemplos.data,
+    atividade: document.getElementById('cv_atividade').value || exemplos.atividade,
+    status: document.getElementById('cv_status').value || exemplos.status,
+  };
+  document.getElementById('copyPreviewBox').textContent = substituirVars(copyConteudo, vars) || '—';
+}
+
+['cv_nome','cv_cargo','cv_data','cv_atividade','cv_status'].forEach(id => {
+  document.getElementById(id)?.addEventListener('input', atualizarCopyPreview);
+});
+
+function copiarParaClipboard() {
+  const txt = document.getElementById('copyPreviewBox').textContent;
+  navigator.clipboard.writeText(txt).then(() => {
+    showToast('Mensagem copiada para a área de transferência!', 'success');
+    fecharCopyModal();
+  });
+}
+
+// Close modals on overlay click
+['templateModal','copyModal'].forEach(id => {
+  document.getElementById(id).addEventListener('click', function(e) {
+    if (e.target === this) {
+      if (id === 'templateModal') fecharModal();
+      else fecharCopyModal();
+    }
+  });
+});
+
+function copiarResumo() {
+  const txt = document.getElementById('resumoBox').textContent;
+  navigator.clipboard.writeText(txt).then(() => {
+    showToast('Resumo copiado com sucesso!', 'success');
+  });
+}
+</script>
+{% endblock %}
