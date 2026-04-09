@@ -152,7 +152,8 @@
 
       <div class="ur-actions">
         <button class="btn btn-ghost btn-sm btn-icon" title="Editar"
-          onclick="abrirModalEditar({{ u.to_dict()|tojson }})">
+          data-user="{{ u.to_dict()|tojson|e }}"
+          onclick="abrirModalEditarBtn(this)">
           <i class="bi bi-pencil"></i>
         </button>
         {% if u.id != current_user.id %}
@@ -280,6 +281,17 @@ function abrirModalCriar() {
   toggleAdminMode();
   document.getElementById('userModal').classList.add('show');
   setTimeout(() => document.getElementById('inputUsername').focus(), 100);
+}
+
+// ─── Abrir modal editar (via data attribute) ───
+function abrirModalEditarBtn(btn) {
+  try {
+    const u = JSON.parse(btn.dataset.user);
+    abrirModalEditar(u);
+  } catch(e) {
+    showToast('Erro ao carregar dados do usuário.', 'error');
+    console.error(e);
+  }
 }
 
 // ─── Abrir modal editar ───
