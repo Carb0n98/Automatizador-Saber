@@ -1,5 +1,6 @@
 from flask_login import UserMixin
 from datetime import datetime, timezone
+import json
 from .extensions import db
 
 
@@ -8,6 +9,38 @@ class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
     password_hash = db.Column(db.String(256), nullable=False)
+    is_admin = db.Column(db.Boolean, default=False, nullable=False)
+    ativo = db.Column(db.Boolean, default=True, nullable=False)
+    permissions = db.Column(db.Text, default='[]')  # JSON list of permission keys
+
+    def has_perm(self, perm):
+        """Admin tem todas as permissões. Outros verificam na lista."""
+        if self.is_admin:
+            return True
+        return perm in self.get_perms()
+
+    def get_perms(self):
+        try:
+            return json.loads(self.permissions or '[]')
+        except Exception:
+            return []
+
+    def set_perms(self, perm_list):
+        self.permissions = json.dumps(list(set(perm_list)))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'username': self.username,
+            'is_admin': self.is_admin,
+            'ativo': self.ativo,
+            'permissions': self.get_perms(),
+        }
+
+    # Flask-Login: desativar conta impede sessão
+    @property
+    def is_active(self):
+        return bool(self.ativo)
 
     def __repr__(self):
         return f'<User {self.username}>'

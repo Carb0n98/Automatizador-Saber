@@ -1,0 +1,398 @@
+{% extends "base.html" %}
+
+{% block title %}Usuários{% endblock %}
+{% block page_title %}Usuários{% endblock %}
+{% block page_subtitle %}Gerenciamento de contas e permissões{% endblock %}
+
+{% block topbar_actions %}
+  <button class="btn btn-primary" id="btnNovoUsuario" onclick="abrirModalCriar()">
+    <i class="bi bi-person-plus"></i> <span>Novo Usuário</span>
+  </button>
+{% endblock %}
+
+{% block extra_css %}
+.users-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.user-row {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.user-row:hover { border-color: var(--border-h); box-shadow: var(--shadow); }
+
+.ur-avatar {
+  width: 44px; height: 44px;
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 17px; font-weight: 700; color: white;
+  flex-shrink: 0;
+}
+.ur-avatar.inactive { background: var(--surface-3); color: var(--text-d); }
+
+.ur-info { flex: 1; min-width: 0; }
+.ur-name { font-size: 14px; font-weight: 600; color: var(--text); }
+.ur-meta { font-size: 12px; color: var(--text-m); margin-top: 3px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.perm-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 99px;
+  font-size: 10.5px; font-weight: 600;
+  background: rgba(124,58,237,0.12); color: var(--primary-l);
+  white-space: nowrap;
+}
+.perm-chip-more {
+  background: var(--surface-2); color: var(--text-d);
+}
+
+.ur-actions { display: flex; gap: 8px; flex-shrink: 0; }
+
+/* Modal permissions grid */
+.perms-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 12px;
+}
+.perm-item {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.perm-item:hover { border-color: var(--primary); background: rgba(124,58,237,0.06); }
+.perm-item input[type=checkbox] { margin-top: 2px; accent-color: var(--primary); flex-shrink: 0; width: 15px; height: 15px; }
+.perm-item label { font-size: 12.5px; color: var(--text-m); cursor: pointer; line-height: 1.4; }
+.perm-item:has(input:checked) { border-color: rgba(124,58,237,0.4); background: rgba(124,58,237,0.08); }
+.perm-item:has(input:checked) label { color: var(--primary-l); }
+
+.admin-banner {
+  background: linear-gradient(135deg, rgba(124,58,237,0.12), rgba(79,70,229,0.12));
+  border: 1px solid rgba(124,58,237,0.25);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-size: 12.5px;
+  color: var(--primary-l);
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 10px;
+}
+
+@media (max-width: 768px) {
+  .perms-grid { grid-template-columns: 1fr; }
+  .user-row { flex-wrap: wrap; }
+}
+{% endblock %}
+
+{% block content %}
+
+{% if not users %}
+  <div class="empty-state">
+    <i class="bi bi-people"></i>
+    <h3>Nenhum usuário cadastrado</h3>
+    <p>Clique em "Novo Usuário" para criar o primeiro acesso.</p>
+  </div>
+{% else %}
+  <div class="users-grid">
+    {% for u in users %}
+    <div class="user-row" id="row-{{ u.id }}">
+
+      <div class="ur-avatar {{ 'inactive' if not u.ativo }}">
+        {{ u.username[0].upper() }}
+      </div>
+
+      <div class="ur-info">
+        <div class="ur-name">
+          {{ u.username }}
+          {% if u.id == current_user.id %}
+            <span style="font-size:11px;color:var(--text-d);font-weight:400">(você)</span>
+          {% endif %}
+        </div>
+        <div class="ur-meta">
+          {% if u.is_admin %}
+            <span class="badge badge-purple"><i class="bi bi-shield-check"></i> Admin</span>
+          {% else %}
+            <span class="badge badge-info"><i class="bi bi-person"></i> Usuário</span>
+          {% endif %}
+
+          {% if u.ativo %}
+            <span class="badge badge-success"><i class="bi bi-circle-fill" style="font-size:6px"></i> Ativo</span>
+          {% else %}
+            <span class="badge badge-danger"><i class="bi bi-circle-fill" style="font-size:6px"></i> Inativo</span>
+          {% endif %}
+
+          {% if not u.is_admin %}
+            {% set perms = u.get_perms() %}
+            {% if perms %}
+              {% for p in perms[:3] %}
+                <span class="perm-chip"><i class="bi bi-check2"></i> {{ permissions[p] if p in permissions else p }}</span>
+              {% endfor %}
+              {% if perms|length > 3 %}
+                <span class="perm-chip perm-chip-more">+{{ perms|length - 3 }} mais</span>
+              {% endif %}
+            {% else %}
+              <span style="font-size:11.5px;color:var(--text-d);font-style:italic">Sem permissões</span>
+            {% endif %}
+          {% else %}
+            <span style="font-size:11.5px;color:var(--primary-l)">Acesso total ao sistema</span>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="ur-actions">
+        <button class="btn btn-ghost btn-sm btn-icon" title="Editar"
+          onclick="abrirModalEditar({{ u.to_dict()|tojson }})">
+          <i class="bi bi-pencil"></i>
+        </button>
+        {% if u.id != current_user.id %}
+        <button class="btn btn-danger btn-sm btn-icon" title="Excluir"
+          onclick="confirmarExcluir({{ u.id }}, '{{ u.username }}')">
+          <i class="bi bi-trash3"></i>
+        </button>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+{% endif %}
+
+
+<!-- ═══ Modal Criar / Editar ═══ -->
+<div class="modal-overlay" id="userModal">
+  <div class="modal-box" style="max-width:600px">
+    <div class="modal-header">
+      <span class="modal-title" id="modalTitle">Novo Usuário</span>
+      <button class="modal-close" onclick="fecharModal()">&times;</button>
+    </div>
+
+    <input type="hidden" id="editUserId" value="">
+
+    <div class="form-group">
+      <label for="inputUsername">Nome de usuário</label>
+      <input type="text" id="inputUsername" placeholder="Ex: joao.silva" autocomplete="off">
+    </div>
+
+    <div class="form-group">
+      <label for="inputPassword" id="labelSenha">Senha</label>
+      <input type="password" id="inputPassword" placeholder="Senha do usuário">
+      <div style="font-size:11.5px;color:var(--text-d);margin-top:4px" id="senhaHint"></div>
+    </div>
+
+    <!-- Admin toggle -->
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
+        <input type="checkbox" id="chkAdmin" onchange="toggleAdminMode()"
+          style="accent-color:var(--primary);width:16px;height:16px">
+        <span style="font-size:13.5px;font-weight:500;color:var(--text)">
+          <i class="bi bi-shield-check" style="color:var(--primary-l)"></i>
+          Administrador (acesso total)
+        </span>
+      </label>
+    </div>
+
+    <!-- Admin banner -->
+    <div class="admin-banner" id="adminBanner" style="display:none">
+      <i class="bi bi-info-circle"></i>
+      Administradores têm acesso total ao sistema — as permissões abaixo não se aplicam.
+    </div>
+
+    <!-- Ativo toggle -->
+    <div class="form-group" id="ativoGroup">
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
+        <input type="checkbox" id="chkAtivo"
+          style="accent-color:var(--success);width:16px;height:16px" checked>
+        <span style="font-size:13.5px;font-weight:500;color:var(--text)">
+          <i class="bi bi-toggle-on" style="color:var(--success)"></i>
+          Conta ativa
+        </span>
+      </label>
+    </div>
+
+    <!-- Permissions -->
+    <div id="permsSection">
+      <label style="font-size:12.5px;font-weight:600;color:var(--text-m);text-transform:uppercase;letter-spacing:0.5px">
+        Permissões
+      </label>
+      <div class="perms-grid" id="permsGrid">
+        {% for key, label in permissions.items() %}
+        <div class="perm-item">
+          <input type="checkbox" id="perm_{{ key }}" value="{{ key }}">
+          <label for="perm_{{ key }}">{{ label }}</label>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:24px">
+      <button class="btn btn-ghost" onclick="fecharModal()">Cancelar</button>
+      <button class="btn btn-primary" id="btnSalvar" onclick="salvarUsuario()">
+        <i class="bi bi-check-lg"></i> Salvar
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Modal Confirmar Exclusão ═══ -->
+<div class="modal-overlay" id="deleteModal">
+  <div class="modal-box" style="max-width:440px">
+    <div class="modal-header">
+      <span class="modal-title">Excluir Usuário</span>
+      <button class="modal-close" onclick="fecharDeleteModal()">&times;</button>
+    </div>
+    <p id="deleteMsg" style="color:var(--text-m);font-size:13.5px;margin-bottom:24px"></p>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="fecharDeleteModal()">Cancelar</button>
+      <button class="btn btn-danger" id="btnConfirmarDelete" onclick="executarExcluir()">
+        <i class="bi bi-trash3"></i> Excluir
+      </button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let pendingDeleteId = null;
+
+// ─── Abrir modal criar ───
+function abrirModalCriar() {
+  document.getElementById('editUserId').value = '';
+  document.getElementById('modalTitle').textContent = 'Novo Usuário';
+  document.getElementById('inputUsername').value = '';
+  document.getElementById('inputPassword').value = '';
+  document.getElementById('inputPassword').placeholder = 'Senha obrigatória';
+  document.getElementById('labelSenha').textContent = 'Senha';
+  document.getElementById('senhaHint').textContent = '';
+  document.getElementById('chkAdmin').checked = false;
+  document.getElementById('chkAtivo').checked = true;
+  document.querySelectorAll('#permsGrid input[type=checkbox]').forEach(c => c.checked = false);
+  toggleAdminMode();
+  document.getElementById('userModal').classList.add('show');
+  setTimeout(() => document.getElementById('inputUsername').focus(), 100);
+}
+
+// ─── Abrir modal editar ───
+function abrirModalEditar(u) {
+  document.getElementById('editUserId').value = u.id;
+  document.getElementById('modalTitle').textContent = `Editar — ${u.username}`;
+  document.getElementById('inputUsername').value = u.username;
+  document.getElementById('inputPassword').value = '';
+  document.getElementById('inputPassword').placeholder = 'Deixe em branco para manter a senha atual';
+  document.getElementById('labelSenha').textContent = 'Nova Senha (opcional)';
+  document.getElementById('senhaHint').textContent = 'Deixe em branco para não alterar.';
+  document.getElementById('chkAdmin').checked = u.is_admin;
+  document.getElementById('chkAtivo').checked = u.ativo;
+  document.querySelectorAll('#permsGrid input[type=checkbox]').forEach(c => {
+    c.checked = u.permissions.includes(c.value);
+  });
+  toggleAdminMode();
+  document.getElementById('userModal').classList.add('show');
+}
+
+function fecharModal() {
+  document.getElementById('userModal').classList.remove('show');
+}
+
+function toggleAdminMode() {
+  const isAdmin = document.getElementById('chkAdmin').checked;
+  document.getElementById('adminBanner').style.display = isAdmin ? 'flex' : 'none';
+  document.getElementById('permsSection').style.opacity = isAdmin ? '0.4' : '1';
+  document.getElementById('permsSection').style.pointerEvents = isAdmin ? 'none' : 'auto';
+}
+
+// ─── Salvar (criar ou editar) ───
+async function salvarUsuario() {
+  const uid = document.getElementById('editUserId').value;
+  const username = document.getElementById('inputUsername').value.trim();
+  const password = document.getElementById('inputPassword').value;
+  const is_admin = document.getElementById('chkAdmin').checked;
+  const ativo = document.getElementById('chkAtivo').checked;
+  const permissions = [...document.querySelectorAll('#permsGrid input:checked')].map(c => c.value);
+
+  if (!username) { showToast('Informe o nome de usuário.', 'error'); return; }
+  if (!uid && !password) { showToast('Informe a senha para o novo usuário.', 'error'); return; }
+
+  const btn = document.getElementById('btnSalvar');
+  btn.disabled = true;
+
+  let url, method;
+  if (uid) {
+    url = `/usuarios/api/${uid}`;
+    method = 'PUT';
+  } else {
+    url = '/usuarios/api';
+    method = 'POST';
+  }
+
+  try {
+    const r = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, is_admin, ativo, permissions })
+    });
+    const data = await r.json();
+
+    if (r.ok) {
+      showToast(data.mensagem, 'success');
+      fecharModal();
+      setTimeout(() => location.reload(), 800);
+    } else {
+      showToast(data.mensagem || 'Erro ao salvar.', 'error');
+    }
+  } catch (e) {
+    showToast('Erro de conexão.', 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ─── Excluir ───
+function confirmarExcluir(id, username) {
+  pendingDeleteId = id;
+  document.getElementById('deleteMsg').textContent =
+    `Tem certeza que deseja excluir o usuário "${username}"? Esta ação não pode ser desfeita.`;
+  document.getElementById('deleteModal').classList.add('show');
+}
+
+function fecharDeleteModal() {
+  document.getElementById('deleteModal').classList.remove('show');
+  pendingDeleteId = null;
+}
+
+async function executarExcluir() {
+  if (!pendingDeleteId) return;
+  const btn = document.getElementById('btnConfirmarDelete');
+  btn.disabled = true;
+  try {
+    const r = await fetch(`/usuarios/api/${pendingDeleteId}`, { method: 'DELETE' });
+    const data = await r.json();
+    if (r.ok) {
+      showToast(data.mensagem, 'success');
+      fecharDeleteModal();
+      setTimeout(() => location.reload(), 800);
+    } else {
+      showToast(data.mensagem, 'error');
+    }
+  } catch(e) {
+    showToast('Erro de conexão.', 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// Fechar modais ao clicar no overlay
+document.getElementById('userModal').addEventListener('click', e => { if (e.target === document.getElementById('userModal')) fecharModal(); });
+document.getElementById('deleteModal').addEventListener('click', e => { if (e.target === document.getElementById('deleteModal')) fecharDeleteModal(); });
+</script>
+{% endblock %}

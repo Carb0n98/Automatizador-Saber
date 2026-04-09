@@ -1,5 +1,5 @@
 from flask import Blueprint, render_template, request, jsonify, flash, redirect, url_for
-from flask_login import login_required
+from flask_login import login_required, current_user
 from ..models import Config
 from ..extensions import db
 
@@ -25,14 +25,28 @@ def index():
 @configuracoes_bp.route('/salvar', methods=['POST'])
 @login_required
 def salvar():
-    campos = ['saber_url', 'saber_usuario', 'saber_senha', 'restaurante', 'telefone']
+    """Salva configurações — aplica guards por grupo de campos."""
+    pode_saber = current_user.has_perm('editar_credenciais_saber')
+    pode_tel   = current_user.has_perm('editar_telefone')
 
-    for campo in campos:
-        valor = request.form.get(campo, '').strip()
-        Config.set(campo, valor)
+    campos_saber = ['saber_url', 'saber_usuario', 'saber_senha', 'restaurante']
+    campos_tel   = ['telefone']
+
+    salvou = False
+    for campo in campos_saber:
+        if pode_saber:
+            Config.set(campo, request.form.get(campo, '').strip())
+            salvou = True
+
+    for campo in campos_tel:
+        if pode_tel:
+            Config.set(campo, request.form.get(campo, '').strip())
+            salvou = True
+
+    if not salvou:
+        return jsonify({'status': 'erro', 'mensagem': 'Sem permissão para alterar as configurações.'}), 403
 
     db.session.commit()
-
     return jsonify({'status': 'ok', 'mensagem': 'Configurações salvas com sucesso.'})
 
 

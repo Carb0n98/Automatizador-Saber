@@ -38,16 +38,20 @@ def create_app():
     from .verificacoes.routes import verificacoes_bp
     from .mensagens.routes import mensagens_bp
     from .configuracoes.routes import configuracoes_bp
+    from .usuarios.routes import usuarios_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(verificacoes_bp)
     app.register_blueprint(mensagens_bp)
     app.register_blueprint(configuracoes_bp)
+    app.register_blueprint(usuarios_bp)
 
-    # DB + seed
+    # DB + migrações automáticas + seed
     with app.app_context():
         db.create_all()
+        from .utils import migrate_user_columns
+        migrate_user_columns(db)  # Adiciona colunas novas se não existirem
         _seed_admin()
         _seed_default_config()
 
@@ -63,11 +67,20 @@ def _seed_admin():
     if not User.query.first():
         admin = User(
             username='admin',
-            password_hash=bcrypt.generate_password_hash('admin123').decode('utf-8')
+            password_hash=bcrypt.generate_password_hash('admin123').decode('utf-8'),
+            is_admin=True,
+            ativo=True,
         )
         db.session.add(admin)
         db.session.commit()
-        print('[SEED] Usuário admin criado → admin / admin123')
+        print('[SEED] Usuario admin criado -> admin / admin123')
+    else:
+        # Garante que o primeiro admin existente seja is_admin=True
+        first = User.query.first()
+        if not first.is_admin:
+            first.is_admin = True
+            db.session.commit()
+            print(f'[SEED] {first.username} promovido a admin')
 
 
 def _seed_default_config():

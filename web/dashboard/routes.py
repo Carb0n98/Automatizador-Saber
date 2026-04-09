@@ -1,7 +1,8 @@
 from flask import Blueprint, render_template, jsonify
-from flask_login import login_required
+from flask_login import login_required, current_user
 from datetime import date
 import threading
+from ..utils import require_perm
 
 dashboard_bp = Blueprint('dashboard', __name__)
 
@@ -70,6 +71,7 @@ def index():
 
 @dashboard_bp.route('/api/buscar', methods=['POST'])
 @login_required
+@require_perm('efetuar_busca')
 def buscar_manual():
     from ..tasks import executar_coleta, is_running
     from flask import current_app
