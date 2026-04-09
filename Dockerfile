@@ -1,7 +1,6 @@
 FROM python:3.11-slim
 
 # ── System dependencies + Chromium ──────────────────────────────
-# Using chromium (available in Debian repos, no external apt source needed)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     chromium \
     chromium-driver \
@@ -41,11 +40,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # ── Runtime config ──────────────────────────────────────────────
-# Create data directory for SQLite DB (override with volume)
-RUN mkdir -p /data
+# Use /app/instance for SQLite — já tem permissão de escrita
+RUN mkdir -p /app/instance
 
 # Non-root user for security
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app /data
+RUN useradd -m -u 1000 appuser \
+    && chown -R appuser:appuser /app
 USER appuser
 
 EXPOSE 5000

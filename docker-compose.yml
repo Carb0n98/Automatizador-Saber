@@ -7,16 +7,15 @@ services:
       - "5000:5000"
     volumes:
       # SQLite database persists outside container
-      - autoverifica_data:/data
+      # Monta sobre /app/instance para ter permissão correta
+      - autoverifica_data:/app/instance
     environment:
-      # ── Obrigatório: configure no painel do Dokploy (Environment), NÃO aqui! ──
+      # ── Configure no painel do Dokploy (Environment), NÃO aqui! ──
       SECRET_KEY: ""
-      DATABASE_URL: "sqlite:////data/verificacoes.db"
-      # ── Opcional: pode configurar também pelo painel web ──
-      # SABER_URL: "https://adtalento.com/websiteSaber"
-      # SABER_USUARIO: ""
-      # SABER_SENHA: ""
-      # RESTAURANTE: "NPN"
+      # Caminho do banco dentro do container (volume montado em /app/instance)
+      DATABASE_URL: "sqlite:////app/instance/verificacoes.db"
+      CHROME_BIN: "/usr/bin/chromium"
+      CHROMEDRIVER_BIN: "/usr/bin/chromedriver"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/auth/login')"]
       interval: 30s

@@ -8,9 +8,15 @@ def create_app():
     app = Flask(__name__, template_folder='templates')
 
     # Config
-    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-2024')
-    db_path = os.path.join(base_dir, 'verificacoes.db')
-    app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', f'sqlite:///{db_path}')
+    secret_key = os.environ.get('SECRET_KEY', '').strip()
+    # Se SECRET_KEY vier vazio, usa fallback de dev (nunca exposta em produção)
+    app.config['SECRET_KEY'] = secret_key if secret_key else 'dev-fallback-altere-em-producao'
+
+    # Database: prioriza env var, senão usa /app/instance/ (funciona local e Docker)
+    instance_dir = os.path.join(base_dir, 'instance')
+    os.makedirs(instance_dir, exist_ok=True)
+    default_db = f'sqlite:///{os.path.join(instance_dir, "verificacoes.db")}'
+    app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', default_db) or default_db
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
     # Extensions
