@@ -26,49 +26,81 @@
 }
 
 .section-icon {
-  width: 38px;
-  height: 38px;
+  width: 38px; height: 38px;
   border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 17px;
-  flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 17px; flex-shrink: 0;
 }
 .icon-purple { background: rgba(124,58,237,0.12); color: var(--primary-l); }
-.icon-green  { background: var(--success-bg);       color: var(--success); }
-.icon-amber  { background: var(--warning-bg);        color: var(--warning); }
+.icon-green  { background: var(--success-bg);      color: var(--success); }
+.icon-amber  { background: var(--warning-bg);       color: var(--warning); }
 
 .section-title { font-size: 15px; font-weight: 700; color: var(--text); }
 .section-sub   { font-size: 12px; color: var(--text-m); margin-top: 2px; }
 
+/* ── Password show/hide toggle ── */
 .pw-wrap { position: relative; }
 .pw-wrap input { padding-right: 44px; }
 .pw-toggle {
   position: absolute;
   right: 12px; top: 50%;
   transform: translateY(-50%);
-  background: none;
-  border: none;
-  color: var(--text-d);
-  cursor: pointer;
-  font-size: 15px;
-  padding: 4px;
-  transition: color 0.15s;
-  line-height: 1;
+  background: none; border: none;
+  color: var(--text-d); cursor: pointer;
+  font-size: 15px; padding: 4px;
+  transition: color 0.15s; line-height: 1;
 }
 .pw-toggle:hover { color: var(--text-m); }
 
+/* ── LOCKED section styles ── */
+.section-locked {
+  position: relative;
+  opacity: 0.72;
+}
+
+/* Lock banner across top of card */
+.lock-banner {
+  display: flex; align-items: center; gap: 8px;
+  background: rgba(239,68,68,0.08);
+  border: 1px solid rgba(239,68,68,0.2);
+  border-radius: var(--radius-sm);
+  padding: 8px 14px;
+  font-size: 12px;
+  color: #fca5a5;
+  margin-bottom: 16px;
+}
+
+/* Disabled-looking input */
+.locked-input {
+  background: var(--surface-2) !important;
+  color: var(--text-d) !important;
+  border-color: var(--border) !important;
+  cursor: not-allowed !important;
+  pointer-events: none;
+}
+
+/* Blurred password — cannot be read */
+.pw-blur {
+  filter: blur(5px);
+  user-select: none;
+  pointer-events: none;
+  letter-spacing: 2px;
+}
+
+/* Disabled button */
+.btn-locked {
+  opacity: 0.4;
+  cursor: not-allowed !important;
+  pointer-events: none;
+}
+
 .info-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
+  display: flex; align-items: flex-start; gap: 10px;
   padding: 11px 14px;
   background: var(--info-bg);
   border: 1px solid rgba(56,189,248,0.2);
   border-radius: var(--radius-sm);
-  font-size: 12.5px;
-  color: #7dd3fc;
+  font-size: 12.5px; color: #7dd3fc;
 }
 
 .save-bar {
@@ -76,13 +108,10 @@
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 18px 24px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  display: flex; align-items: center;
+  justify-content: space-between; gap: 16px;
   margin-top: 24px;
 }
-
 .save-bar p { font-size: 13px; color: var(--text-m); }
 
 @media (max-width: 900px) {
@@ -99,28 +128,43 @@
   <div class="settings-section">
 
     <!-- SABER Connection -->
-    <div class="card">
+    <div class="card {% if not can_saber %}section-locked{% endif %}">
       <div class="section-header">
         <div class="section-icon icon-purple"><i class="bi bi-globe2"></i></div>
         <div>
           <div class="section-title">Conexão SABER</div>
           <div class="section-sub">URL e credenciais de acesso ao sistema externo</div>
         </div>
+        {% if not can_saber %}
+        <div style="margin-left:auto">
+          <span class="badge badge-danger"><i class="bi bi-lock-fill"></i> Bloqueado</span>
+        </div>
+        {% endif %}
       </div>
       <hr style="border:none;border-top:1px solid var(--border);margin:16px 0"/>
+
+      {% if not can_saber %}
+      <div class="lock-banner">
+        <i class="bi bi-shield-lock-fill"></i>
+        Você não tem permissão para editar as credenciais do SABER.
+        Contate um administrador.
+      </div>
+      {% endif %}
 
       <div class="form-group">
         <label for="saber_url">URL do Sistema</label>
         <input type="text" id="saber_url" name="saber_url"
                value="{{ config.saber_url }}"
-               placeholder="https://adtalento.com/websiteSaber"/>
+               placeholder="https://adtalento.com/websiteSaber"
+               {% if not can_saber %}class="locked-input" disabled{% endif %}/>
       </div>
 
       <div class="form-group">
         <label for="saber_usuario">Usuário</label>
         <input type="text" id="saber_usuario" name="saber_usuario"
                value="{{ config.saber_usuario }}"
-               placeholder="Ex: 60010603" autocomplete="off"/>
+               placeholder="Ex: 60010603" autocomplete="off"
+               {% if not can_saber %}class="locked-input" disabled{% endif %}/>
       </div>
 
       <div class="form-group" style="margin-bottom:0">
@@ -128,10 +172,18 @@
         <div class="pw-wrap">
           <input type="password" id="saber_senha" name="saber_senha"
                  value="{{ config.saber_senha }}"
-                 placeholder="••••••••" autocomplete="new-password"/>
+                 placeholder="••••••••" autocomplete="new-password"
+                 {% if not can_saber %}class="locked-input pw-blur" disabled{% endif %}/>
+          {% if can_saber %}
           <button type="button" class="pw-toggle" data-target="saber_senha">
             <i class="bi bi-eye"></i>
           </button>
+          {% else %}
+          <!-- Ícone de cadeado no lugar do olho quando bloqueado -->
+          <span class="pw-toggle" style="cursor:not-allowed;pointer-events:none">
+            <i class="bi bi-lock-fill" style="color:var(--danger);opacity:0.6"></i>
+          </span>
+          {% endif %}
         </div>
       </div>
 
@@ -141,20 +193,27 @@
       </div>
 
       <div style="margin-top:16px">
-        <button type="button" class="btn btn-ghost btn-sm" onclick="testarConexao()">
+        <button type="button"
+                class="btn btn-ghost btn-sm {% if not can_saber %}btn-locked{% endif %}"
+                onclick="testarConexao()">
           <i class="bi bi-wifi"></i> Testar Conexão
         </button>
       </div>
     </div>
 
     <!-- Automation -->
-    <div class="card">
+    <div class="card {% if not can_saber %}section-locked{% endif %}">
       <div class="section-header">
         <div class="section-icon icon-amber"><i class="bi bi-robot"></i></div>
         <div>
           <div class="section-title">Automação</div>
           <div class="section-sub">Configurações do restaurante e filtros</div>
         </div>
+        {% if not can_saber %}
+        <div style="margin-left:auto">
+          <span class="badge badge-danger"><i class="bi bi-lock-fill"></i> Bloqueado</span>
+        </div>
+        {% endif %}
       </div>
       <hr style="border:none;border-top:1px solid var(--border);margin:16px 0"/>
 
@@ -162,7 +221,8 @@
         <label for="restaurante">Código do Restaurante</label>
         <input type="text" id="restaurante" name="restaurante"
                value="{{ config.restaurante }}"
-               placeholder="Ex: NPN"/>
+               placeholder="Ex: NPN"
+               {% if not can_saber %}class="locked-input" disabled{% endif %}/>
         <div style="font-size:11.5px;color:var(--text-d);margin-top:6px">
           <i class="bi bi-info-circle"></i>
           O mês é obtido automaticamente (mês atual).
@@ -206,21 +266,34 @@
     </div>
 
     <!-- Notifications -->
-    <div class="card">
+    <div class="card {% if not can_tel %}section-locked{% endif %}">
       <div class="section-header">
         <div class="section-icon icon-green"><i class="bi bi-whatsapp"></i></div>
         <div>
           <div class="section-title">Notificações</div>
           <div class="section-sub">Número para envio de relatórios via WhatsApp</div>
         </div>
+        {% if not can_tel %}
+        <div style="margin-left:auto">
+          <span class="badge badge-danger"><i class="bi bi-lock-fill"></i> Bloqueado</span>
+        </div>
+        {% endif %}
       </div>
       <hr style="border:none;border-top:1px solid var(--border);margin:16px 0"/>
+
+      {% if not can_tel %}
+      <div class="lock-banner">
+        <i class="bi bi-shield-lock-fill"></i>
+        Você não tem permissão para alterar o número de WhatsApp.
+      </div>
+      {% endif %}
 
       <div class="form-group" style="margin-bottom:0">
         <label for="telefone">Número WhatsApp</label>
         <input type="text" id="telefone" name="telefone"
                value="{{ config.telefone }}"
-               placeholder="+5584991021240"/>
+               placeholder="+5584991021240"
+               {% if not can_tel %}class="locked-input" disabled{% endif %}/>
         <div style="font-size:11.5px;color:var(--text-d);margin-top:6px">
           <i class="bi bi-info-circle"></i>
           Formato internacional com DDI. Ex: +5511999999999
@@ -253,9 +326,15 @@
     <button type="button" class="btn btn-ghost" onclick="location.reload()">
       <i class="bi bi-arrow-counterclockwise"></i> Descartar
     </button>
+    {% if can_saber or can_tel %}
     <button type="button" class="btn btn-primary" id="btnSalvar" onclick="salvarConfigs()">
       <i class="bi bi-floppy2"></i> Salvar Configurações
     </button>
+    {% else %}
+    <button type="button" class="btn btn-primary btn-locked" disabled title="Sem permissão para salvar">
+      <i class="bi bi-lock-fill"></i> Sem Permissão
+    </button>
+    {% endif %}
   </div>
 </div>
 </form>
@@ -263,10 +342,11 @@
 
 {% block extra_js %}
 <script>
-// Toggle password visibility
-document.querySelectorAll('.pw-toggle').forEach(btn => {
+// Toggle password visibility (apenas se não estiver bloqueado)
+document.querySelectorAll('.pw-toggle[data-target]').forEach(btn => {
   btn.addEventListener('click', function() {
     const inp = document.getElementById(this.dataset.target);
+    if (!inp || inp.disabled) return;
     const icon = this.querySelector('i');
     if (inp.type === 'password') {
       inp.type = 'text';

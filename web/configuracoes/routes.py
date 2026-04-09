@@ -19,6 +19,8 @@ def index():
     return render_template('configuracoes/index.html',
         active='configuracoes',
         config=campos,
+        can_saber=current_user.has_perm('editar_credenciais_saber'),
+        can_tel=current_user.has_perm('editar_telefone'),
     )
 
 
