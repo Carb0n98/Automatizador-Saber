@@ -93,9 +93,12 @@ def api_status():
 def api_conectar():
     from . import wa_client
     try:
-        wa_client.ensure_instance()
-        qr = wa_client.get_qr()
-        return jsonify({'status': 'ok', 'qr': qr})
+        result = wa_client.ensure_instance_and_get_qr()
+        if result.get('error'):
+            return jsonify({'status': 'erro', 'mensagem': result['error']}), 500
+        if result.get('already_connected'):
+            return jsonify({'status': 'conectado'})
+        return jsonify({'status': 'ok', 'qr': result})
     except Exception as e:
         return jsonify({'status': 'erro', 'mensagem': str(e)}), 500
 
@@ -110,6 +113,8 @@ def api_qr():
         if status.get('connected'):
             return jsonify({'connected': True})
         qr = wa_client.get_qr()
+        if qr.get('error'):
+            return jsonify({'connected': False, 'error': qr['error']})
         return jsonify({'connected': False, 'qr': qr})
     except Exception as e:
         return jsonify({'connected': False, 'error': str(e)}), 200

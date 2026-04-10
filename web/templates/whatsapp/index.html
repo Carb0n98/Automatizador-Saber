@@ -444,20 +444,70 @@ async function iniciarConexao() {
   document.getElementById('secQR').style.display     = '';
   document.getElementById('qrLoading').style.display = '';
   document.getElementById('qrImg').style.display     = 'none';
+  document.getElementById('qrTimer').textContent     = '';
 
-  const dot   = document.getElementById('connDot');
+  const dot = document.getElementById('connDot');
   dot.className = 'conn-dot waiting';
   document.getElementById('connLabel').textContent = 'Aguardando QR...';
 
   try {
-    await fetch('/whatsapp/api/conectar', { method: 'POST' });
-    await carregarQR();
+    const r    = await fetch('/whatsapp/api/conectar', { method: 'POST' });
+    const data = await r.json();
+
+    if (data.status === 'conectado') {
+      await verificarStatus();
+      showToast('WhatsApp já está conectado!', 'success');
+      return;
+    }
+
+    if (data.status === 'erro') {
+      mostrarErroQR(data.mensagem || 'Falha ao gerar QR Code.');
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-qr-code-scan"></i> Tentar Novamente';
+      return;
+    }
+
+    // QR recebido diretamente na resposta
+    if (data.qr) {
+      exibirQR(data.qr);
+    } else {
+      mostrarErroQR('QR Code não foi retornado. Tente novamente.');
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-qr-code-scan"></i> Tentar Novamente';
+      return;
+    }
+
     iniciarPollingQR();
+    btn.innerHTML = '<span class="spinner"></span> Aguardando scan...';
+
   } catch(e) {
-    showToast('Erro ao conectar: ' + e.message, 'error');
+    mostrarErroQR('Erro de conexão: ' + e.message);
     btn.disabled = false;
-    btn.innerHTML = '<i class="bi bi-qr-code-scan"></i> Gerar QR Code';
+    btn.innerHTML = '<i class="bi bi-qr-code-scan"></i> Tentar Novamente';
   }
+}
+
+function exibirQR(qr) {
+  const b64 = qr?.base64 || qr?.qrcode;
+  if (!b64) {
+    mostrarErroQR('QR Code inválido recebido da API.');
+    return;
+  }
+  const img = document.getElementById('qrImg');
+  img.src = b64.startsWith('data:') ? b64 : `data:image/png;base64,${b64}`;
+  img.style.display = '';
+  document.getElementById('qrLoading').style.display = 'none';
+  iniciarTimerQR();
+}
+
+function mostrarErroQR(msg) {
+  document.getElementById('qrLoading').innerHTML = `
+    <i class="bi bi-exclamation-triangle" style="font-size:28px;color:#ef4444"></i>
+    <span style="font-size:12px;color:#ef4444;text-align:center;max-width:180px">${msg}</span>
+  `;
+  document.getElementById('qrLoading').style.display = 'flex';
+  document.getElementById('qrImg').style.display = 'none';
+  pararPollingQR();
 }
 
 async function carregarQR() {
@@ -466,26 +516,23 @@ async function carregarQR() {
     const data = await r.json();
 
     if (data.connected) {
-      // QR escaneado!
-      await verificarStatus();
       pararPollingQR();
-      showToast('WhatsApp conectado com sucesso!', 'success');
+      await verificarStatus();
+      showToast('WhatsApp conectado!', 'success');
       return;
     }
 
-    const qr = data.qr || {};
-    // Evolution retorna base64 (PNG ou JPG)
-    const b64 = qr.base64 || qr.qrcode || qr.code;
-    if (b64) {
-      const img = document.getElementById('qrImg');
-      const src = b64.startsWith('data:') ? b64 : `data:image/png;base64,${b64}`;
-      img.src = src;
-      img.style.display = '';
-      document.getElementById('qrLoading').style.display = 'none';
-      iniciarTimerQR();
+    if (data.error) {
+      // Não mostra erro ainda — pode ser transiente. Deixa o polling continuar.
+      console.warn('[WA QR] Erro ao buscar QR:', data.error);
+      return;
+    }
+
+    if (data.qr) {
+      exibirQR(data.qr);
     }
   } catch(e) {
-    console.error(e);
+    console.error('[WA QR polling]', e);
   }
 }
 
