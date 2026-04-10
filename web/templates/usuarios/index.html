@@ -152,8 +152,7 @@
 
       <div class="ur-actions">
         <button class="btn btn-ghost btn-sm btn-icon" title="Editar"
-          data-user="{{ u.to_dict()|tojson|e }}"
-          onclick="abrirModalEditarBtn(this)">
+          onclick="abrirModalEditar(USERS_DATA[{{ u.id }}])">
           <i class="bi bi-pencil"></i>
         </button>
         {% if u.id != current_user.id %}
@@ -283,19 +282,15 @@ function abrirModalCriar() {
   setTimeout(() => document.getElementById('inputUsername').focus(), 100);
 }
 
-// ─── Abrir modal editar (via data attribute) ───
-function abrirModalEditarBtn(btn) {
-  try {
-    const u = JSON.parse(btn.dataset.user);
-    abrirModalEditar(u);
-  } catch(e) {
-    showToast('Erro ao carregar dados do usuário.', 'error');
-    console.error(e);
-  }
-}
+// Dados de usuarios pre-carregados do servidor (evita problema de aspas em atributos HTML)
+const USERS_DATA = {};
+{% for u in users %}
+USERS_DATA[{{ u.id }}] = {{ u.to_dict()|tojson }};
+{% endfor %}
 
 // ─── Abrir modal editar ───
 function abrirModalEditar(u) {
+  if (!u) { showToast('Dados do usuário não encontrados.', 'error'); return; }
   document.getElementById('editUserId').value = u.id;
   document.getElementById('modalTitle').textContent = `Editar — ${u.username}`;
   document.getElementById('inputUsername').value = u.username;
