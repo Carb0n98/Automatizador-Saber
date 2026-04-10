@@ -14,7 +14,7 @@ INSTANCE = 'autoverifica'
 TIMEOUT  = 15
 
 
-def _h() -> Dict[str, str]:
+def _h() -> Dict:
     return {'apikey': API_KEY, 'Content-Type': 'application/json'}
 
 
@@ -23,24 +23,18 @@ def _url(path: str) -> str:
 
 
 def _extract_qr(data: dict) -> Dict:
-    """
-    Tenta extrair o QR code de diferentes formatos de resposta da Evolution API v2.
-    Retorna { base64, code } se encontrado, ou {} se não.
-    """
-    # Formato 1: { base64: '...', code: '...' }  (GET /instance/connect)
+    """Extrai base64 do QR de qualquer formato de resposta da Evolution API v2."""
+    if not isinstance(data, dict):
+        return {}
+
+    # Formato A: { base64: '...', code: '...' }
     if data.get('base64'):
         return {'base64': data['base64'], 'code': data.get('code', '')}
 
-    # Formato 2: { qrcode: { base64: '...', code: '...' } }  (POST /instance/create)
+    # Formato B: { qrcode: { base64: '...', code: '...' } }
     qr = data.get('qrcode') or {}
-    if qr.get('base64'):
+    if isinstance(qr, dict) and qr.get('base64'):
         return {'base64': qr['base64'], 'code': qr.get('code', '')}
-
-    # Formato 3: { instance: { qrcode: { base64: '...' } } }
-    inst = data.get('instance') or {}
-    qr2 = inst.get('qrcode') or {}
-    if qr2.get('base64'):
-        return {'base64': qr2['base64'], 'code': qr2.get('code', '')}
 
     return {}
 
@@ -61,77 +55,77 @@ def _instance_exists() -> bool:
     return False
 
 
-def _create_instance() -> Dict:
-    """Cria uma nova instância e retorna resposta completa."""
-    r = requests.post(_url('/instance/create'), headers=_h(), json={
-        'instanceName': INSTANCE,
-        'qrcode': True,
-        'integration': 'WHATSAPP-BAILEYS',
-    }, timeout=TIMEOUT)
-    if not r.ok:
-        return {'error': f'HTTP {r.status_code}: {r.text[:300]}'}
-    return r.json()
-
-
-def _get_connect_qr() -> Dict:
-    """Chama GET /instance/connect para buscar QR de instância existente."""
+def _delete_instance():
+    """Remove a instância completamente (sem verificar erros)."""
     try:
-        r = requests.get(
-            _url(f'/instance/connect/{INSTANCE}'),
-            headers=_h(), timeout=TIMEOUT
-        )
-        if r.ok:
-            return r.json()
+        requests.delete(_url(f'/instance/logout/{INSTANCE}'),
+                        headers=_h(), timeout=TIMEOUT)
     except Exception:
         pass
-    return {}
+    try:
+        requests.delete(_url(f'/instance/delete/{INSTANCE}'),
+                        headers=_h(), timeout=TIMEOUT)
+    except Exception:
+        pass
 
 
 def ensure_instance_and_get_qr() -> Dict:
     """
-    Garante que a instância existe e retorna o QR code.
-    Estratégia:
-    1. Se já existe → busca QR com GET /instance/connect
-    2. Se GET não tiver QR → recria a instância (delete + create)
-    3. QR vem no corpo do POST /instance/create (campo 'qrcode')
-    4. Se ainda sem QR → polling por até 10s
+    Garante a instância e retorna QR.
+    Estratégia: se já conectado retorna; senão, deleta tudo e cria fresh.
+    O QR vem diretamente na resposta do POST /instance/create.
     """
+    # 1. Se já está conectado — não faz nada
+    st = get_status()
+    if st.get('connected'):
+        return {'already_connected': True}
+
+    # 2. Deleta instância existente (se houver) para garantir QR no create
     if _instance_exists():
-        # Tenta get QR para reconexão
-        data = _get_connect_qr()
-        qr = _extract_qr(data)
-        if qr:
-            return qr
-        # GET não gerou QR — deleta para recriar
-        print(f'[WA] GET /connect retornou sem QR ({data}), recriando instância...')
-        disconnect()
+        print(f'[WA] Removendo instancia existente antes de recriar...')
+        _delete_instance()
         time.sleep(2)
 
-    # Cria instância nova
-    print('[WA] Criando instância...')
-    data = _create_instance()
-    if data.get('error'):
-        return data
+    # 3. Cria instância nova com qrcode=True
+    print(f'[WA] Criando instancia {INSTANCE}...')
+    try:
+        r = requests.post(_url('/instance/create'), headers=_h(), json={
+            'instanceName': INSTANCE,
+            'qrcode': True,
+            'integration': 'WHATSAPP-BAILEYS',
+        }, timeout=TIMEOUT)
+    except requests.exceptions.ConnectionError:
+        return {'error': 'Evolution API offline ou inacessível. Verifique se o container evolution-api está rodando.'}
+    except Exception as e:
+        return {'error': f'Erro ao criar instância: {e}'}
 
-    # QR pode estar direto na resposta do create
-    qr = _extract_qr(data)
+    if not r.ok:
+        return {'error': f'Evolution API retornou HTTP {r.status_code}: {r.text[:300]}'}
+
+    create_data = r.json()
+    print(f'[WA] Resposta do create: {str(create_data)[:300]}')
+
+    # 4. QR vem na resposta do create
+    qr = _extract_qr(create_data)
     if qr:
-        print('[WA] QR obtido da resposta do create. OK.')
+        print('[WA] QR extraido da resposta do create com sucesso.')
         return qr
 
-    # Caso raro: QR não veio no create, aguarda e tenta connect
-    print('[WA] QR não veio no create. Aguardando inicialização...')
-    time.sleep(3)
-    for attempt in range(5):
-        data = _get_connect_qr()
-        qr = _extract_qr(data)
-        if qr:
-            print(f'[WA] QR obtido via GET /connect na tentativa {attempt + 1}.')
-            return qr
-        print(f'[WA] Tentativa {attempt + 1} sem QR: {data}')
-        time.sleep(2)
+    # 5. Fallback: aguarda e busca QR via GET /instance/connect
+    print('[WA] QR nao encontrado na resposta do create. Aguardando...')
+    time.sleep(4)
 
-    return {'error': f'QR não disponível após várias tentativas. Última resposta: {data}'}
+    try:
+        r2 = requests.get(_url(f'/instance/connect/{INSTANCE}'),
+                          headers=_h(), timeout=TIMEOUT)
+        if r2.ok:
+            qr = _extract_qr(r2.json())
+            if qr:
+                return qr
+            return {'error': f'GET /connect retornou: {r2.json()}'}
+        return {'error': f'GET /connect HTTP {r2.status_code}: {r2.text[:200]}'}
+    except Exception as e:
+        return {'error': f'Erro no fallback GET /connect: {e}'}
 
 
 def get_qr() -> Dict:
@@ -140,13 +134,13 @@ def get_qr() -> Dict:
         st = get_status()
         if st.get('connected'):
             return {'already_connected': True}
-        data = _get_connect_qr()
-        qr = _extract_qr(data)
-        if qr:
-            return qr
-        if data:
-            return {'error': f'Sem QR: {str(data)[:150]}'}
-        return {'error': 'Resposta vazia da Evolution API'}
+        r = requests.get(_url(f'/instance/connect/{INSTANCE}'),
+                         headers=_h(), timeout=TIMEOUT)
+        if r.ok:
+            data = r.json()
+            qr = _extract_qr(data)
+            return qr if qr else {'error': f'Sem QR: {data}'}
+        return {'error': f'HTTP {r.status_code}'}
     except requests.exceptions.ConnectionError:
         return {'error': 'Evolution API offline'}
     except Exception as e:
@@ -182,14 +176,8 @@ def get_status() -> Dict:
 
 def disconnect() -> bool:
     """Desconecta e remove a instância."""
-    try:
-        requests.delete(_url(f'/instance/logout/{INSTANCE}'),
-                        headers=_h(), timeout=TIMEOUT)
-        requests.delete(_url(f'/instance/delete/{INSTANCE}'),
-                        headers=_h(), timeout=TIMEOUT)
-        return True
-    except Exception:
-        return False
+    _delete_instance()
+    return True
 
 
 # ─── Contatos e Grupos ────────────────────────────────────────────────────
@@ -212,12 +200,9 @@ def get_chats(limit: int = 200) -> List[Dict]:
                 })
     except Exception:
         pass
-
     try:
-        r = requests.post(
-            _url(f'/chat/findContacts/{INSTANCE}'),
-            headers=_h(), json={}, timeout=TIMEOUT
-        )
+        r = requests.post(_url(f'/chat/findContacts/{INSTANCE}'),
+                          headers=_h(), json={}, timeout=TIMEOUT)
         if r.ok:
             for c in (r.json() or [])[:100]:
                 jid = c.get('id', '')
@@ -227,7 +212,6 @@ def get_chats(limit: int = 200) -> List[Dict]:
                 result.append({'id': jid, 'name': name, 'type': 'contato', 'pic': ''})
     except Exception:
         pass
-
     return result[:limit]
 
 
