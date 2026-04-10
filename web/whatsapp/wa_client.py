@@ -10,7 +10,7 @@ from typing import Dict, List
 # ─── Configuração via variáveis de ambiente ────────────────────────────────
 BASE_URL = os.environ.get('EVOLUTION_BASE_URL', 'http://localhost:8080').rstrip('/')
 API_KEY  = os.environ.get('EVOLUTION_API_KEY', 'autoverifica-evo-key-2024')
-INSTANCE = 'autoverifica'
+INSTANCE = 'autoverifica-v2'
 TIMEOUT  = 15
 
 
