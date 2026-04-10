@@ -48,14 +48,30 @@ def _gerar_resumo() -> str:
 @login_required
 def index():
     from . import wa_client
-    cfg    = WhatsappConfig.get_config()
-    status = wa_client.get_status()
+
+    # Protecao: se a tabela ainda nao existir no banco antigo, cria sem crash
+    try:
+        cfg = WhatsappConfig.get_config()
+    except Exception:
+        db.create_all()
+        cfg = WhatsappConfig.get_config()
+
+    # Evolution API pode estar offline -- nunca deixar crashar a pagina
+    try:
+        wa_status = wa_client.get_status()
+    except Exception:
+        wa_status = {'connected': False, 'status': 'evolution_offline'}
+
+    try:
+        evo_ok = wa_client.is_evolution_online()
+    except Exception:
+        evo_ok = False
+
     resumo = _gerar_resumo()
-    evo_ok = wa_client.is_evolution_online()
     return render_template('whatsapp/index.html',
         active='whatsapp',
         cfg=cfg,
-        wa_status=status,
+        wa_status=wa_status,
         resumo=resumo,
         evo_online=evo_ok,
     )
