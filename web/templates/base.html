@@ -1036,6 +1036,12 @@
         Mensagens
       </a>
 
+      <a href="{{ url_for('whatsapp.index') }}"
+         class="nav-item {% if active == 'whatsapp' %}active{% endif %}">
+        <i class="bi bi-whatsapp"></i>
+        WhatsApp
+      </a>
+
       <div class="nav-section">Sistema</div>
 
       <a href="{{ url_for('configuracoes.index') }}"

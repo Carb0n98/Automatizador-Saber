@@ -123,3 +123,29 @@ class LogAutomacao(db.Model):
             'total_coletados': self.total_coletados,
             'mensagem': self.mensagem,
         }
+
+
+class WhatsappConfig(db.Model):
+    __tablename__ = 'whatsapp_config'
+    id = db.Column(db.Integer, primary_key=True)
+    # Destinatário (JID do grupo ou número)
+    destinatario_id   = db.Column(db.String(200), default='')
+    destinatario_nome = db.Column(db.String(200), default='')
+    destinatario_tipo = db.Column(db.String(20),  default='')  # 'grupo' | 'contato'
+    # Agendamento
+    agendamento_ativo = db.Column(db.Boolean, default=False)
+    horario_envio     = db.Column(db.String(5),  default='08:00')  # HH:MM
+    # Histórico
+    ultimo_envio      = db.Column(db.DateTime, nullable=True)
+    ultimo_status     = db.Column(db.String(20), default='')
+    atualizado_em     = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    @staticmethod
+    def get_config():
+        """Retorna (ou cria) o registro único de configuração do WhatsApp."""
+        cfg = WhatsappConfig.query.first()
+        if not cfg:
+            cfg = WhatsappConfig()
+            db.session.add(cfg)
+            db.session.commit()
+        return cfg

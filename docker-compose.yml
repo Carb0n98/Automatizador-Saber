@@ -6,23 +6,72 @@ services:
     ports:
       - "5000:5000"
     volumes:
-      # SQLite database persists outside container
-      # Monta sobre /app/instance para ter permissão correta
       - autoverifica_data:/app/instance
     environment:
-      # ── Configure no painel do Dokploy (Environment), NÃO aqui! ──
       SECRET_KEY: ""
-      # Caminho do banco dentro do container (volume montado em /app/instance)
       DATABASE_URL: "sqlite:////app/instance/verificacoes.db"
       CHROME_BIN: "/usr/bin/chromium"
       CHROMEDRIVER_BIN: "/usr/bin/chromedriver"
+      # URL interna da Evolution API (dentro da rede Docker)
+      EVOLUTION_BASE_URL: "http://evolution-api:8080"
+      EVOLUTION_API_KEY: "autoverifica-evo-key-2024"
+    depends_on:
+      - evolution-api
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/auth/login')"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 20s
+      start_period: 30s
+
+  # ── Evolution API — WhatsApp Gateway ───────────────────────────────────
+  evolution-api:
+    image: atendai/evolution-api:v2.2.3
+    container_name: evolution-api
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - evolution_data:/evolution/instances
+    depends_on:
+      - evolution-redis
+    environment:
+      SERVER_URL: "http://evolution-api:8080"
+      AUTHENTICATION_API_KEY: "autoverifica-evo-key-2024"
+      # Persistência via Redis (sessão WhatsApp sobrevive a restarts)
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: "redis://evolution-redis:6379/0"
+      CACHE_REDIS_TTL: "604800"
+      CACHE_REDIS_SAVE_INSTANCES: "true"
+      CACHE_LOCAL_ENABLED: "false"
+      # SQLite para banco interno da Evolution
+      DATABASE_PROVIDER: "sqlite"
+      DATABASE_CONNECTION_URI: "file:/evolution/instances/evolution.db"
+      DATABASE_SAVE_DATA_INSTANCE: "true"
+      DATABASE_SAVE_DATA_OLD_MESSAGE: "false"
+      DATABASE_SAVE_DATA_NEW_MESSAGE: "true"
+      DATABASE_SAVE_DATA_CONTACTS: "true"
+      DATABASE_SAVE_DATA_CHATS: "true"
+      # WhatsApp config
+      WA_BUSINESS_TOKEN_WEBHOOK: "false"
+      QRCODE_LIMIT: "30"
+      QRCODE_COLOR: "#128C7E"
+      LOG_LEVEL: "WARN"
+      LOG_COLOR: "false"
+
+  # ── Redis — Cache para sessões do WhatsApp ─────────────────────────────
+  evolution-redis:
+    image: redis:7-alpine
+    container_name: evolution-redis
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning --appendonly yes
+    volumes:
+      - evolution_redis:/data
 
 volumes:
   autoverifica_data:
+    driver: local
+  evolution_data:
+    driver: local
+  evolution_redis:
     driver: local

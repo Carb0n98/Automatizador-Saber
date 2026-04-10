@@ -39,6 +39,7 @@ def create_app():
     from .mensagens.routes import mensagens_bp
     from .configuracoes.routes import configuracoes_bp
     from .usuarios.routes import usuarios_bp
+    from .whatsapp.routes import whatsapp_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(dashboard_bp)
@@ -46,6 +47,7 @@ def create_app():
     app.register_blueprint(mensagens_bp)
     app.register_blueprint(configuracoes_bp)
     app.register_blueprint(usuarios_bp)
+    app.register_blueprint(whatsapp_bp)
 
     # DB + migrações automáticas + seed
     with app.app_context():

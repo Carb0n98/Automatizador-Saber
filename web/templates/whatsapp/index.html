@@ -1,0 +1,713 @@
+{% extends "base.html" %}
+
+{% block title %}WhatsApp{% endblock %}
+{% block page_title %}WhatsApp{% endblock %}
+{% block page_subtitle %}Conexão, envio manual e agendamento de mensagens{% endblock %}
+
+{% block extra_css %}
+/* ── Layout ── */
+.wa-grid {
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  gap: 20px;
+  align-items: start;
+}
+@media (max-width: 900px) { .wa-grid { grid-template-columns: 1fr; } }
+
+/* ── Status badge ── */
+.conn-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  flex-shrink: 0; display: inline-block;
+}
+.conn-dot.connected    { background: var(--success); box-shadow: 0 0 8px var(--success); animation: pulse 2s infinite; }
+.conn-dot.disconnected { background: var(--text-d); }
+.conn-dot.waiting      { background: var(--warning); box-shadow: 0 0 8px var(--warning); animation: pulse 1s infinite; }
+
+/* ── QR Code ── */
+.qr-box {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 14px; padding: 24px;
+  background: white; border-radius: var(--radius);
+  text-align: center;
+}
+.qr-box img { width: 220px; height: 220px; border-radius: 8px; image-rendering: pixelated; }
+.qr-hint { font-size: 12px; color: #555; line-height: 1.5; max-width: 220px; }
+.qr-spinner-box {
+  width: 220px; height: 220px;
+  display: flex; align-items: center; justify-content: center;
+  background: #f5f5f5; border-radius: 8px; flex-direction: column; gap: 12px; color: #888;
+}
+
+/* ── Perfil conectado ── */
+.wa-profile {
+  display: flex; align-items: center; gap: 14px;
+  padding: 16px 20px;
+  background: rgba(16,185,129,0.06);
+  border: 1px solid rgba(16,185,129,0.2);
+  border-radius: var(--radius);
+}
+.wa-avatar {
+  width: 48px; height: 48px; border-radius: 50%;
+  background: var(--surface-2); overflow: hidden; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px; color: var(--success);
+}
+.wa-avatar img { width: 100%; height: 100%; object-fit: cover; }
+
+/* ── Seletor de contato ── */
+.chat-search-wrap { position: relative; }
+.chat-search-wrap i { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text-d); }
+.chat-search-wrap input { padding-left: 36px; }
+
+.chat-list {
+  max-height: 280px; overflow-y: auto;
+  margin-top: 8px; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); background: var(--surface-2);
+}
+.chat-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.1s;
+}
+.chat-item:last-child { border-bottom: none; }
+.chat-item:hover { background: rgba(124,58,237,0.07); }
+.chat-item.selected {
+  background: rgba(124,58,237,0.12);
+  border-left: 3px solid var(--primary);
+}
+.chat-icon {
+  width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 15px; background: var(--surface-3); color: var(--text-m);
+}
+.chat-name  { font-size: 13.5px; font-weight: 500; color: var(--text); }
+.chat-type  { font-size: 11px; color: var(--text-d); margin-top: 1px; }
+
+/* ── Resumo ── */
+.resumo-box {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  font-size: 13px;
+  color: var(--text-m);
+  white-space: pre-wrap;
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  line-height: 1.6;
+  min-height: 120px;
+  max-height: 280px;
+  overflow-y: auto;
+  resize: vertical;
+}
+
+/* ── Destinatário chip ── */
+.dest-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 12px;
+  background: rgba(124,58,237,0.1);
+  border: 1px solid rgba(124,58,237,0.3);
+  border-radius: 20px;
+  font-size: 12.5px;
+  color: var(--primary-l);
+  font-weight: 500;
+  flex-wrap: nowrap;
+}
+.dest-chip button {
+  background: none; border: none; cursor: pointer;
+  color: var(--primary-l); font-size: 14px; padding: 0; line-height: 1;
+}
+
+/* ── Agendamento toggle ── */
+.sched-toggle {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px 16px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.toggle-label { font-size: 13.5px; font-weight: 500; color: var(--text); flex: 1; }
+
+/* Offline banner */
+.evo-offline {
+  background: rgba(239,68,68,0.08);
+  border: 1px solid rgba(239,68,68,0.2);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  font-size: 12.5px;
+  color: #fca5a5;
+  display: flex; align-items: flex-start; gap: 10px;
+  margin-bottom: 20px;
+}
+{% endblock %}
+
+{% block content %}
+
+{% if not evo_online %}
+<div class="evo-offline">
+  <i class="bi bi-exclamation-triangle-fill" style="flex-shrink:0;margin-top:1px"></i>
+  <div>
+    <strong>Evolution API offline.</strong> Verifique se o container <code>evolution-api</code>
+    está rodando no Dokploy. O sistema WhatsApp não estará disponível até que o serviço esteja ativo.
+  </div>
+</div>
+{% endif %}
+
+<div class="wa-grid">
+
+  <!-- ── Coluna esquerda: Conexão + Seleção de contato ── -->
+  <div style="display:flex;flex-direction:column;gap:20px">
+
+    <!-- Card de Conexão -->
+    <div class="card" id="cardConexao">
+      <div class="card-header" style="margin-bottom:16px">
+        <div class="card-title">
+          <i class="bi bi-whatsapp" style="color:#25D366;margin-right:8px"></i>
+          Conexão WhatsApp
+        </div>
+        <div style="display:flex;align-items:center;gap:8px" id="statusBadge">
+          <span class="conn-dot {{ 'connected' if wa_status.connected else 'disconnected' }}"
+                id="connDot"></span>
+          <span id="connLabel" style="font-size:12.5px;color:var(--text-m)">
+            {{ 'Conectado' if wa_status.connected else 'Desconectado' }}
+          </span>
+        </div>
+      </div>
+
+      <!-- Estado: CONECTADO -->
+      <div id="secConectado" style="{{ '' if wa_status.connected else 'display:none' }}">
+        <div class="wa-profile">
+          <div class="wa-avatar">
+            {% if wa_status.pic %}
+            <img src="{{ wa_status.pic }}" alt="foto">
+            {% else %}
+            <i class="bi bi-person-fill"></i>
+            {% endif %}
+          </div>
+          <div>
+            <div style="font-size:14px;font-weight:600;color:var(--text)" id="waProfileName">
+              {{ wa_status.name or 'WhatsApp' }}
+            </div>
+            <div style="font-size:12px;color:var(--text-m)" id="waProfilePhone">
+              +{{ wa_status.phone or '—' }}
+            </div>
+          </div>
+          <span class="badge badge-success" style="margin-left:auto">
+            <i class="bi bi-check-circle-fill"></i> Online
+          </span>
+        </div>
+        <button class="btn btn-ghost btn-sm mt-16" style="width:100%;color:var(--danger)"
+                onclick="desconectar()">
+          <i class="bi bi-plug"></i> Desconectar
+        </button>
+      </div>
+
+      <!-- Estado: DESCONECTADO -->
+      <div id="secDesconectado" style="{{ 'display:none' if wa_status.connected else '' }}">
+        <p style="font-size:13px;color:var(--text-m);margin-bottom:16px">
+          Conecte seu WhatsApp escaneando o QR Code com seu celular.
+        </p>
+        <button class="btn btn-primary w-100" id="btnConectar" onclick="iniciarConexao()">
+          <i class="bi bi-qr-code-scan"></i> Gerar QR Code
+        </button>
+      </div>
+
+      <!-- QR Code (aparece após clicar em Conectar) -->
+      <div id="secQR" style="display:none;margin-top:16px">
+        <div class="qr-box">
+          <div id="qrLoading" class="qr-spinner-box">
+            <span class="spinner" style="border-color:rgba(37,211,102,0.3);border-top-color:#25D366;width:32px;height:32px"></span>
+            <span style="font-size:12px">Gerando QR Code...</span>
+          </div>
+          <img id="qrImg" src="" alt="QR Code" style="display:none">
+          <div class="qr-hint">
+            Abra o WhatsApp no celular → Configurações → Aparelhos conectados → Conectar aparelho
+          </div>
+          <div id="qrTimer" style="font-size:11px;color:#999"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Card: Selecionar Destinatário -->
+    <div class="card">
+      <div class="card-header" style="margin-bottom:14px">
+        <div class="card-title">
+          <i class="bi bi-person-lines-fill" style="color:var(--primary-l);margin-right:8px"></i>
+          Destinatário
+        </div>
+        {% if cfg.destinatario_nome %}
+        <span class="badge badge-purple">Configurado</span>
+        {% endif %}
+      </div>
+
+      <!-- Chip do destinatário selecionado -->
+      <div id="destChipWrap" style="{{ '' if cfg.destinatario_nome else 'display:none' }};margin-bottom:12px">
+        <div class="dest-chip" id="destChip">
+          <i class="bi {% if cfg.destinatario_tipo == 'grupo' %}bi-people-fill{% else %}bi-person-fill{% endif %}"
+             id="destChipIcon"></i>
+          <span id="destChipName">{{ cfg.destinatario_nome }}</span>
+          <button onclick="limparDestinatario()" title="Remover">&#x2715;</button>
+        </div>
+      </div>
+
+      <!-- Busca de contatos -->
+      <div class="chat-search-wrap">
+        <i class="bi bi-search"></i>
+        <input type="text" id="chatSearch" placeholder="Buscar contato ou grupo..."
+               oninput="filtrarChats()" onclick="carregarChats()">
+      </div>
+      <div class="chat-list" id="chatList" style="display:none"></div>
+
+      <div style="margin-top:12px">
+        <button class="btn btn-ghost btn-sm" onclick="carregarChats()">
+          <i class="bi bi-arrow-clockwise"></i> Atualizar lista
+        </button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── Coluna direita: Resumo + Agendamento ── -->
+  <div style="display:flex;flex-direction:column;gap:20px">
+
+    <!-- Card: Mensagem / Resumo -->
+    <div class="card">
+      <div class="card-header" style="margin-bottom:14px">
+        <div class="card-title">
+          <i class="bi bi-chat-text" style="color:var(--primary-l);margin-right:8px"></i>
+          Mensagem Diária
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="carregarResumo()">
+          <i class="bi bi-arrow-clockwise"></i> Atualizar
+        </button>
+      </div>
+
+      <div style="font-size:12.5px;color:var(--text-m);margin-bottom:8px">
+        Resumo gerado automaticamente com base nas verificações pendentes e atrasadas:
+      </div>
+
+      <div class="resumo-box" id="resumoBox" contenteditable="true"
+           spellcheck="false">{{ resumo }}</div>
+
+      <div style="margin-top:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+        <div style="font-size:12px;color:var(--text-d)" id="destInfo">
+          {% if cfg.destinatario_nome %}
+            Para: <strong style="color:var(--primary-l)">{{ cfg.destinatario_nome }}</strong>
+          {% else %}
+            <span style="color:var(--warning)">
+              <i class="bi bi-exclamation-triangle"></i> Selecione um destinatário ao lado
+            </span>
+          {% endif %}
+        </div>
+        <button class="btn btn-primary" id="btnEnviar" onclick="enviarAgora()">
+          <i class="bi bi-send-fill"></i> Enviar Agora
+        </button>
+      </div>
+    </div>
+
+    <!-- Card: Agendamento -->
+    <div class="card">
+      <div class="card-header" style="margin-bottom:16px">
+        <div class="card-title">
+          <i class="bi bi-clock-history" style="color:var(--warning);margin-right:8px"></i>
+          Envio Automático
+        </div>
+        <span class="badge {{ 'badge-success' if cfg.agendamento_ativo else 'badge-warning' }}"
+              id="schedBadge">
+          {{ 'Ativo' if cfg.agendamento_ativo else 'Inativo' }}
+        </span>
+      </div>
+
+      <div class="sched-toggle">
+        <div class="toggle-label">
+          <i class="bi bi-repeat" style="color:var(--primary-l);margin-right:6px"></i>
+          Enviar resumo automaticamente
+        </div>
+        <input type="checkbox" id="chkAgendamento" style="accent-color:var(--success);width:18px;height:18px"
+               {{ 'checked' if cfg.agendamento_ativo }}
+               onchange="toggleAgendamento()">
+      </div>
+
+      <div id="schedConfig" style="{{ '' if cfg.agendamento_ativo else 'opacity:0.5;pointer-events:none' }};margin-top:16px">
+        <div class="form-group" style="margin-bottom:0">
+          <label for="inputHorario">Horário de envio</label>
+          <input type="time" id="inputHorario" value="{{ cfg.horario_envio or '08:00' }}"
+                 style="max-width:160px">
+          <div style="font-size:11.5px;color:var(--text-d);margin-top:6px">
+            <i class="bi bi-info-circle"></i>
+            O envio acontecerá todos os dias úteis no horário configurado.
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:20px">
+        <button class="btn btn-primary" onclick="salvarConfig()">
+          <i class="bi bi-floppy2"></i> Salvar Configurações
+        </button>
+      </div>
+
+      <!-- Último envio -->
+      {% if cfg.ultimo_envio %}
+      <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border);
+                  font-size:12px;color:var(--text-d)">
+        <i class="bi bi-clock"></i>
+        Último envio: <strong>{{ cfg.ultimo_envio.strftime('%d/%m/%Y às %H:%M') }}</strong>
+        <span class="badge badge-{{ 'success' if cfg.ultimo_status == 'enviado' else 'danger' }}"
+              style="margin-left:6px">{{ cfg.ultimo_status }}</span>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Card: Info Evolution API -->
+    <div class="card" style="background:rgba(124,58,237,0.04);border-color:rgba(124,58,237,0.15)">
+      <div style="display:flex;align-items:flex-start;gap:12px">
+        <i class="bi bi-info-circle-fill" style="color:var(--primary-l);font-size:18px;flex-shrink:0;margin-top:2px"></i>
+        <div>
+          <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px">
+            Evolution API
+          </div>
+          <div style="font-size:12px;color:var(--text-m);line-height:1.7">
+            Powered by <strong>Evolution API v2</strong> + Baileys.<br>
+            Status:
+            <span class="badge {{ 'badge-success' if evo_online else 'badge-danger' }}">
+              {{ 'Online' if evo_online else 'Offline' }}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// ── Estado local ────────────────────────────────────────────────────────
+let selectedChat = null;   // { id, name, type }
+let allChats     = [];
+let qrPolling    = null;
+let qrTimeout    = null;
+
+// Pré-carregar destinatário salvo
+{% if cfg.destinatario_id %}
+selectedChat = {
+  id:   {{ cfg.destinatario_id   | tojson }},
+  name: {{ cfg.destinatario_nome | tojson }},
+  type: {{ cfg.destinatario_tipo | tojson }},
+};
+{% endif %}
+
+// ── Polling de status ao carregar ──────────────────────────────────────
+(async () => {
+  await verificarStatus();
+})();
+
+async function verificarStatus() {
+  try {
+    const r  = await fetch('/whatsapp/api/status');
+    const st = await r.json();
+    atualizarUI(st);
+  } catch(e) { /* Evolution offline */ }
+}
+
+function atualizarUI(st) {
+  const dot   = document.getElementById('connDot');
+  const label = document.getElementById('connLabel');
+  const secC  = document.getElementById('secConectado');
+  const secD  = document.getElementById('secDesconectado');
+  const secQR = document.getElementById('secQR');
+
+  if (st.connected) {
+    dot.className   = 'conn-dot connected';
+    label.textContent = 'Conectado';
+    secC.style.display  = '';
+    secD.style.display  = 'none';
+    secQR.style.display = 'none';
+    document.getElementById('waProfileName').textContent  = st.name  || 'WhatsApp';
+    document.getElementById('waProfilePhone').textContent = '+' + (st.phone || '—');
+    pararPollingQR();
+  } else {
+    dot.className   = 'conn-dot disconnected';
+    label.textContent = 'Desconectado';
+    secC.style.display  = 'none';
+    secD.style.display  = '';
+  }
+}
+
+// ── Conectar / QR ──────────────────────────────────────────────────────
+async function iniciarConexao() {
+  const btn = document.getElementById('btnConectar');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Conectando...';
+
+  document.getElementById('secQR').style.display     = '';
+  document.getElementById('qrLoading').style.display = '';
+  document.getElementById('qrImg').style.display     = 'none';
+
+  const dot   = document.getElementById('connDot');
+  dot.className = 'conn-dot waiting';
+  document.getElementById('connLabel').textContent = 'Aguardando QR...';
+
+  try {
+    await fetch('/whatsapp/api/conectar', { method: 'POST' });
+    await carregarQR();
+    iniciarPollingQR();
+  } catch(e) {
+    showToast('Erro ao conectar: ' + e.message, 'error');
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-qr-code-scan"></i> Gerar QR Code';
+  }
+}
+
+async function carregarQR() {
+  try {
+    const r    = await fetch('/whatsapp/api/qr');
+    const data = await r.json();
+
+    if (data.connected) {
+      // QR escaneado!
+      await verificarStatus();
+      pararPollingQR();
+      showToast('WhatsApp conectado com sucesso!', 'success');
+      return;
+    }
+
+    const qr = data.qr || {};
+    // Evolution retorna base64 (PNG ou JPG)
+    const b64 = qr.base64 || qr.qrcode || qr.code;
+    if (b64) {
+      const img = document.getElementById('qrImg');
+      const src = b64.startsWith('data:') ? b64 : `data:image/png;base64,${b64}`;
+      img.src = src;
+      img.style.display = '';
+      document.getElementById('qrLoading').style.display = 'none';
+      iniciarTimerQR();
+    }
+  } catch(e) {
+    console.error(e);
+  }
+}
+
+function iniciarPollingQR() {
+  pararPollingQR();
+  qrPolling = setInterval(carregarQR, 20000);  // Renova QR a cada 20s
+}
+
+function pararPollingQR() {
+  if (qrPolling) { clearInterval(qrPolling); qrPolling = null; }
+  if (qrTimeout) { clearInterval(qrTimeout); qrTimeout = null; }
+}
+
+function iniciarTimerQR() {
+  let secs = 60;
+  if (qrTimeout) clearInterval(qrTimeout);
+  qrTimeout = setInterval(() => {
+    secs--;
+    document.getElementById('qrTimer').textContent = `Expira em ${secs}s`;
+    if (secs <= 0) {
+      clearInterval(qrTimeout);
+      document.getElementById('qrTimer').textContent = 'QR expirado — atualizando...';
+    }
+  }, 1000);
+}
+
+// ── Desconectar ───────────────────────────────────────────────────────
+async function desconectar() {
+  if (!confirm('Desconectar esta sessão do WhatsApp?')) return;
+  await fetch('/whatsapp/api/desconectar', { method: 'POST' });
+  showToast('WhatsApp desconectado.', 'info');
+  setTimeout(() => location.reload(), 600);
+}
+
+// ── Carregar contatos/grupos ──────────────────────────────────────────
+async function carregarChats() {
+  const list = document.getElementById('chatList');
+  list.style.display = '';
+  list.innerHTML = `<div style="padding:16px;text-align:center;color:var(--text-d);font-size:12.5px">
+    <span class="spinner" style="border-color:rgba(124,58,237,0.3);border-top-color:var(--primary)"></span>
+    Carregando contatos...
+  </div>`;
+
+  try {
+    const r    = await fetch('/whatsapp/api/chats');
+    const data = await r.json();
+    allChats = data.chats || [];
+    renderChats(allChats);
+  } catch(e) {
+    list.innerHTML = `<div style="padding:12px;color:var(--danger);font-size:12px">
+      Erro ao carregar contatos. WhatsApp está conectado?</div>`;
+  }
+}
+
+function renderChats(chats) {
+  const list = document.getElementById('chatList');
+  if (!chats.length) {
+    list.innerHTML = `<div style="padding:12px;color:var(--text-d);font-size:12.5px;text-align:center">
+      Nenhum contato encontrado.</div>`;
+    return;
+  }
+
+  list.innerHTML = chats.map(c => `
+    <div class="chat-item ${selectedChat && selectedChat.id === c.id ? 'selected' : ''}"
+         onclick="selecionarChat(${JSON.stringify(c).replace(/"/g,'&quot;')})">
+      <div class="chat-icon">
+        <i class="bi ${c.type === 'grupo' ? 'bi-people-fill' : 'bi-person-fill'}"></i>
+      </div>
+      <div>
+        <div class="chat-name">${escHtml(c.name)}</div>
+        <div class="chat-type">${c.type === 'grupo' ? 'Grupo' : 'Contato'}</div>
+      </div>
+      ${selectedChat && selectedChat.id === c.id
+        ? '<i class="bi bi-check-circle-fill" style="margin-left:auto;color:var(--primary-l)"></i>'
+        : ''}
+    </div>
+  `).join('');
+}
+
+function filtrarChats() {
+  const q = document.getElementById('chatSearch').value.toLowerCase().trim();
+  if (!allChats.length) { carregarChats(); return; }
+  const filtered = q ? allChats.filter(c => c.name.toLowerCase().includes(q)) : allChats;
+  renderChats(filtered);
+}
+
+function selecionarChat(chat) {
+  // chat pode vir como objeto ou como string (onclick inline)
+  if (typeof chat === 'string') {
+    try { chat = JSON.parse(chat); } catch(e) { return; }
+  }
+  selectedChat = chat;
+  renderChats(allChats.filter(c => {
+    const q = document.getElementById('chatSearch').value.toLowerCase();
+    return !q || c.name.toLowerCase().includes(q);
+  }));
+  atualizarDestChip();
+  document.getElementById('chatList').style.display = 'none';
+  document.getElementById('chatSearch').value = '';
+}
+
+function atualizarDestChip() {
+  const wrap    = document.getElementById('destChipWrap');
+  const chipName = document.getElementById('destChipName');
+  const chipIcon = document.getElementById('destChipIcon');
+  const destInfo = document.getElementById('destInfo');
+
+  if (selectedChat) {
+    chipName.textContent = selectedChat.name;
+    chipIcon.className   = `bi ${selectedChat.type === 'grupo' ? 'bi-people-fill' : 'bi-person-fill'}`;
+    wrap.style.display   = '';
+    destInfo.innerHTML   = `Para: <strong style="color:var(--primary-l)">${escHtml(selectedChat.name)}</strong>`;
+  } else {
+    wrap.style.display = 'none';
+    destInfo.innerHTML = `<span style="color:var(--warning)">
+      <i class="bi bi-exclamation-triangle"></i> Selecione um destinatário ao lado</span>`;
+  }
+}
+
+function limparDestinatario() {
+  selectedChat = null;
+  atualizarDestChip();
+}
+
+// ── Atualizar resumo ────────────────────────────────────────────────────
+async function carregarResumo() {
+  const box = document.getElementById('resumoBox');
+  box.textContent = 'Carregando...';
+  try {
+    const r = await fetch('/whatsapp/api/resumo');
+    const d = await r.json();
+    box.textContent = d.resumo;
+  } catch(e) {
+    box.textContent = 'Erro ao carregar resumo.';
+  }
+}
+
+// ── Enviar agora ────────────────────────────────────────────────────────
+async function enviarAgora() {
+  if (!selectedChat) {
+    showToast('Selecione um destinatário antes de enviar.', 'error');
+    return;
+  }
+
+  const texto = document.getElementById('resumoBox').textContent.trim();
+  if (!texto) {
+    showToast('A mensagem está vazia.', 'error');
+    return;
+  }
+
+  const btn = document.getElementById('btnEnviar');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Enviando...';
+
+  try {
+    const r = await fetch('/whatsapp/api/enviar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: selectedChat.id, texto }),
+    });
+    const data = await r.json();
+
+    if (data.status === 'ok') {
+      showToast('Mensagem enviada com sucesso!', 'success');
+    } else {
+      showToast(data.mensagem || 'Erro ao enviar.', 'error');
+    }
+  } catch(e) {
+    showToast('Erro de conexão.', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-send-fill"></i> Enviar Agora';
+  }
+}
+
+// ── Agendamento ────────────────────────────────────────────────────────
+function toggleAgendamento() {
+  const ativo  = document.getElementById('chkAgendamento').checked;
+  const config = document.getElementById('schedConfig');
+  const badge  = document.getElementById('schedBadge');
+  config.style.opacity       = ativo ? '1' : '0.5';
+  config.style.pointerEvents = ativo ? 'auto' : 'none';
+  badge.className = 'badge ' + (ativo ? 'badge-success' : 'badge-warning');
+  badge.textContent = ativo ? 'Ativo' : 'Inativo';
+}
+
+async function salvarConfig() {
+  if (selectedChat) {
+    // Persiste escolha do destinatário junto com agendamento
+  }
+  const payload = {
+    destinatario_id:   selectedChat ? selectedChat.id   : '',
+    destinatario_nome: selectedChat ? selectedChat.name : '',
+    destinatario_tipo: selectedChat ? selectedChat.type : '',
+    agendamento_ativo: document.getElementById('chkAgendamento').checked,
+    horario_envio:     document.getElementById('inputHorario').value || '08:00',
+  };
+
+  try {
+    const r = await fetch('/whatsapp/api/salvar-config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await r.json();
+    showToast(data.mensagem || 'Configurações salvas!', data.status === 'ok' ? 'success' : 'error');
+  } catch(e) {
+    showToast('Erro ao salvar.', 'error');
+  }
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// Fechar lista ao clicar fora
+document.addEventListener('click', e => {
+  if (!e.target.closest('#chatList') && !e.target.closest('.chat-search-wrap')) {
+    document.getElementById('chatList').style.display = 'none';
+  }
+});
+</script>
+{% endblock %}
