@@ -38,24 +38,24 @@ services:
     environment:
       SERVER_URL: "http://evolution-api:8080"
       AUTHENTICATION_API_KEY: "autoverifica-evo-key-2024"
-      # ── Banco: PostgreSQL (SQLite não é suportado na v2) ──
+      # ── Banco: PostgreSQL (Histórico desativado para evitar Timeout 408/Erro 515) ──
       DATABASE_PROVIDER: "postgresql"
       DATABASE_CONNECTION_URI: "postgresql://evolution:evolution123@evolution-postgres:5432/evolution"
       DATABASE_SAVE_DATA_INSTANCE: "true"
       DATABASE_SAVE_DATA_OLD_MESSAGE: "false"
       DATABASE_SAVE_DATA_NEW_MESSAGE: "true"
-      DATABASE_SAVE_DATA_CONTACTS: "true"
-      DATABASE_SAVE_DATA_CHATS: "true"
-      # ── Cache Redis ──
-      CACHE_REDIS_ENABLED: "true"
-      CACHE_REDIS_URI: "redis://evolution-redis:6379/0"
-      CACHE_REDIS_TTL: "604800"
-      CACHE_REDIS_SAVE_INSTANCES: "true"
-      CACHE_LOCAL_ENABLED: "false"
+      DATABASE_SAVE_DATA_CONTACTS: "false"
+      DATABASE_SAVE_DATA_CHATS: "false"
+      DATABASE_SAVE_DATA_HISTORIC: "false"
+      DATABASE_SAVE_DATA_LABELS: "false"
+      # ── Cache: Local (Mais rápido que Redis para arranque pesado do Baileys) ──
+      CACHE_REDIS_ENABLED: "false"
+      CACHE_LOCAL_ENABLED: "true"
       # ── Configurações gerais ──
+      CONFIG_SESSION_PHONE_VERSION: "2.3000.1033773198"
       QRCODE_LIMIT: "30"
       QRCODE_COLOR: "#128C7E"
-      LOG_LEVEL: "WARN"
+      LOG_LEVEL: "INFO"
       LOG_COLOR: "false"
       DEL_INSTANCE: "false"
 
