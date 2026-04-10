@@ -12,7 +12,6 @@ services:
       DATABASE_URL: "sqlite:////app/instance/verificacoes.db"
       CHROME_BIN: "/usr/bin/chromium"
       CHROMEDRIVER_BIN: "/usr/bin/chromedriver"
-      # URL interna da Evolution API (dentro da rede Docker)
       EVOLUTION_BASE_URL: "http://evolution-api:8080"
       EVOLUTION_API_KEY: "autoverifica-evo-key-2024"
     depends_on:
@@ -34,30 +33,48 @@ services:
     volumes:
       - evolution_data:/evolution/instances
     depends_on:
+      - evolution-postgres
       - evolution-redis
     environment:
       SERVER_URL: "http://evolution-api:8080"
       AUTHENTICATION_API_KEY: "autoverifica-evo-key-2024"
-      # Persistência via Redis (sessão WhatsApp sobrevive a restarts)
-      CACHE_REDIS_ENABLED: "true"
-      CACHE_REDIS_URI: "redis://evolution-redis:6379/0"
-      CACHE_REDIS_TTL: "604800"
-      CACHE_REDIS_SAVE_INSTANCES: "true"
-      CACHE_LOCAL_ENABLED: "false"
-      # SQLite para banco interno da Evolution
-      DATABASE_PROVIDER: "sqlite"
-      DATABASE_CONNECTION_URI: "file:/evolution/instances/evolution.db"
+      # ── Banco: PostgreSQL (SQLite não é suportado na v2) ──
+      DATABASE_PROVIDER: "postgresql"
+      DATABASE_CONNECTION_URI: "postgresql://evolution:evolution123@evolution-postgres:5432/evolution"
       DATABASE_SAVE_DATA_INSTANCE: "true"
       DATABASE_SAVE_DATA_OLD_MESSAGE: "false"
       DATABASE_SAVE_DATA_NEW_MESSAGE: "true"
       DATABASE_SAVE_DATA_CONTACTS: "true"
       DATABASE_SAVE_DATA_CHATS: "true"
-      # WhatsApp config
-      WA_BUSINESS_TOKEN_WEBHOOK: "false"
+      # ── Cache Redis ──
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: "redis://evolution-redis:6379/0"
+      CACHE_REDIS_TTL: "604800"
+      CACHE_REDIS_SAVE_INSTANCES: "true"
+      CACHE_LOCAL_ENABLED: "false"
+      # ── Configurações gerais ──
       QRCODE_LIMIT: "30"
       QRCODE_COLOR: "#128C7E"
       LOG_LEVEL: "WARN"
       LOG_COLOR: "false"
+      DEL_INSTANCE: "false"
+
+  # ── PostgreSQL — Banco da Evolution API ───────────────────────────────
+  evolution-postgres:
+    image: postgres:16-alpine
+    container_name: evolution-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: "evolution"
+      POSTGRES_PASSWORD: "evolution123"
+      POSTGRES_DB: "evolution"
+    volumes:
+      - evolution_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evolution"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # ── Redis — Cache para sessões do WhatsApp ─────────────────────────────
   evolution-redis:
@@ -72,6 +89,8 @@ volumes:
   autoverifica_data:
     driver: local
   evolution_data:
+    driver: local
+  evolution_postgres:
     driver: local
   evolution_redis:
     driver: local
