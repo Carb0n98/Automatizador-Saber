@@ -72,19 +72,42 @@ def _delete_instance():
 def ensure_instance_and_get_qr() -> Dict:
     """
     Garante a instância e retorna QR.
-    Estratégia: se já conectado retorna; senão, deleta tudo e cria fresh.
-    O QR vem diretamente na resposta do POST /instance/create.
+    Se já existe, usa o GET /instance/connect (que gera QR para instâncias offline).
+    Se não existe, cria a instância. EVITAMOS DELETAR a instância aqui, pois
+    a Evolution API v2 apaga instâncias de forma assíncrona, e se recriarmos
+    logo em seguida, a task de exclusão apaga a nova instância!
     """
     # 1. Se já está conectado — não faz nada
     st = get_status()
     if st.get('connected'):
         return {'already_connected': True}
 
-    # 2. Deleta instância existente (se houver) para garantir QR no create
+    # 2. Se a instância já existe, apenas pede o connect para gerar QR
     if _instance_exists():
-        print(f'[WA] Removendo instancia existente antes de recriar...')
-        _delete_instance()
-        time.sleep(2)
+        print(f'[WA] Instância {INSTANCE} existe. Solicitando QR (GET /connect)...')
+        try:
+            r = requests.get(_url(f'/instance/connect/{INSTANCE}'),
+                             headers=_h(), timeout=TIMEOUT)
+            if r.ok:
+                data = r.json()
+                qr = _extract_qr(data)
+                if qr:
+                    return qr
+                # Se não retornou QR (ex: count: 0), a instância pode estar corrompida.
+                # Tentamos dar um POST /logout (não delete) para resetar a conexão.
+                print(f'[WA] GET /connect retornou sem QR: {data}. Resetando conexão...')
+                requests.delete(_url(f'/instance/logout/{INSTANCE}'), headers=_h(), timeout=TIMEOUT)
+                time.sleep(2)
+                # Tenta conectar de novo
+                r2 = requests.get(_url(f'/instance/connect/{INSTANCE}'), headers=_h(), timeout=TIMEOUT)
+                if r2.ok:
+                    qr2 = _extract_qr(r2.json())
+                    if qr2:
+                        return qr2
+                return {'error': f'A instância falhou em gerar o QR code. Resposta: {r2.json()}'}
+            return {'error': f'Erro ao solicitar QR: HTTP {r.status_code}'}
+        except Exception as e:
+            return {'error': f'Erro de conexão ao buscar QR: {e}'}
 
     # 3. Cria instância nova com qrcode=True
     print(f'[WA] Criando instancia {INSTANCE}...')
@@ -95,37 +118,31 @@ def ensure_instance_and_get_qr() -> Dict:
             'integration': 'WHATSAPP-BAILEYS',
         }, timeout=TIMEOUT)
     except requests.exceptions.ConnectionError:
-        return {'error': 'Evolution API offline ou inacessível. Verifique se o container evolution-api está rodando.'}
+        return {'error': 'Evolution API offline ou inacessível.'}
     except Exception as e:
         return {'error': f'Erro ao criar instância: {e}'}
 
     if not r.ok:
-        return {'error': f'Evolution API retornou HTTP {r.status_code}: {r.text[:300]}'}
+        return {'error': f'Falha ao criar: HTTP {r.status_code}: {r.text[:300]}'}
 
     create_data = r.json()
-    print(f'[WA] Resposta do create: {str(create_data)[:300]}')
+    print(f'[WA] Instância criada. Resposta: {str(create_data)[:200]}')
 
-    # 4. QR vem na resposta do create
+    # 4. QR deve vir na resposta do create
     qr = _extract_qr(create_data)
     if qr:
-        print('[WA] QR extraido da resposta do create com sucesso.')
         return qr
 
-    # 5. Fallback: aguarda e busca QR via GET /instance/connect
-    print('[WA] QR nao encontrado na resposta do create. Aguardando...')
-    time.sleep(4)
-
+    # 5. Fallback curto
+    time.sleep(2)
     try:
-        r2 = requests.get(_url(f'/instance/connect/{INSTANCE}'),
-                          headers=_h(), timeout=TIMEOUT)
+        r2 = requests.get(_url(f'/instance/connect/{INSTANCE}'), headers=_h(), timeout=TIMEOUT)
         if r2.ok:
-            qr = _extract_qr(r2.json())
-            if qr:
-                return qr
-            return {'error': f'GET /connect retornou: {r2.json()}'}
-        return {'error': f'GET /connect HTTP {r2.status_code}: {r2.text[:200]}'}
+            return _extract_qr(r2.json()) or {'error': f'GET /connect sem QR: {r2.json()}'}
+        return {'error': f'Fallback HTTP {r2.status_code}'}
     except Exception as e:
-        return {'error': f'Erro no fallback GET /connect: {e}'}
+        return {'error': f'Erro fallback: {e}'}
+
 
 
 def get_qr() -> Dict:
