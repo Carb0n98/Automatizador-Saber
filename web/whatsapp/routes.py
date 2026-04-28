@@ -184,10 +184,6 @@ def api_enviar():
     if not text:
         return jsonify({'status': 'erro', 'mensagem': 'Mensagem vazia.'}), 400
 
-    status = wa_client.get_status()
-    if not status.get('connected'):
-        return jsonify({'status': 'erro', 'mensagem': 'WhatsApp nao esta conectado.'}), 400
-
     result = wa_client.send_text(to, text)
     if result.get('ok'):
         # Registra último envio
@@ -197,4 +193,12 @@ def api_enviar():
         db.session.commit()
         return jsonify({'status': 'ok', 'mensagem': 'Mensagem enviada com sucesso!'})
     else:
+        # needs_reconnect sinaliza que a sessão expirou — mensagem clara para o usuário
+        if result.get('needs_reconnect'):
+            return jsonify({
+                'status': 'erro',
+                'mensagem': result.get('error', 'Sessão expirada. Reconecte o WhatsApp.'),
+                'needs_reconnect': True,
+            }), 503
         return jsonify({'status': 'erro', 'mensagem': result.get('error', 'Falha no envio.')}), 500
+

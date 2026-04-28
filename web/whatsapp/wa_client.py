@@ -1,8 +1,15 @@
 """
 Wrapper para a Evolution API — gateway WhatsApp REST.
 Documentação: https://doc.evolution-api.com
+
+Arquitetura de sessão:
+- A Evolution API v2 persiste o STATUS da instância no PostgreSQL
+- Os ARQUIVOS de sessão Baileys ficam em /evolution/instances (volume Docker)
+- Porém o cache local (RAM) pode ser perdido em restarts, causando SessionError
+- Por isso, validamos a sessão ativamente antes de enviar mensagens
 """
 import os
+import re
 import time
 import requests
 from typing import Dict, List
@@ -26,16 +33,11 @@ def _extract_qr(data: dict) -> Dict:
     """Extrai base64 do QR de qualquer formato de resposta da Evolution API v2."""
     if not isinstance(data, dict):
         return {}
-
-    # Formato A: { base64: '...', code: '...' }
     if data.get('base64'):
         return {'base64': data['base64'], 'code': data.get('code', '')}
-
-    # Formato B: { qrcode: { base64: '...', code: '...' } }
     qr = data.get('qrcode') or {}
     if isinstance(qr, dict) and qr.get('base64'):
         return {'base64': qr['base64'], 'code': qr.get('code', '')}
-
     return {}
 
 
@@ -69,6 +71,77 @@ def _delete_instance():
         pass
 
 
+# ─── Health Check de Sessão ───────────────────────────────────────────────
+
+def check_session_health() -> bool:
+    """
+    Verifica se a sessão Baileys está REALMENTE ativa fazendo uma chamada
+    leve que requer sessão válida (fetchProfile da própria instância).
+
+    Isso detecta o caso onde connectionStatus=open no banco mas a sessão
+    RAM foi perdida (container restart com CACHE_LOCAL_ENABLED).
+
+    Retorna True se a sessão está funcional, False se está morta.
+    """
+    try:
+        # GET /chat/findChats é leve e exige sessão ativa
+        r = requests.post(
+            _url(f'/chat/findChats/{INSTANCE}'),
+            headers=_h(),
+            json={'where': {}, 'limit': 1},
+            timeout=8
+        )
+        if r.status_code == 200:
+            return True
+        # 400 com "No sessions" ou "Bad Session" = sessão morta
+        if r.status_code == 400:
+            body = r.text.lower()
+            if 'no sessions' in body or 'session' in body or 'bad session' in body:
+                print(f'[WA] Health check: sessão morta detectada → {r.text[:150]}')
+                return False
+        # Outros erros (404, 500) não são definitivos sobre sessão
+        return r.status_code < 500
+    except Exception as e:
+        print(f'[WA] Health check: erro de conexão → {e}')
+        return False
+
+
+def _try_reconnect() -> bool:
+    """
+    Tenta reativar uma sessão morta fazendo logout + reconnect.
+    Não deleta a instância (preserva credenciais no banco).
+    Retorna True se reconectou, False se precisa de novo QR.
+    """
+    print('[WA] Tentando reconexão automática da sessão...')
+    try:
+        # Logout limpa o estado corrompido sem deletar a instância
+        requests.delete(_url(f'/instance/logout/{INSTANCE}'),
+                        headers=_h(), timeout=TIMEOUT)
+        time.sleep(2)
+
+        # Tenta reconectar — se houver sessão salva em disco, o Baileys recupera
+        r = requests.get(_url(f'/instance/connect/{INSTANCE}'),
+                         headers=_h(), timeout=TIMEOUT)
+        if r.ok:
+            data = r.json()
+            # Se retornou QR → não reconectou automaticamente, precisa scan
+            if _extract_qr(data):
+                print('[WA] Reconexão: QR gerado, usuário precisa escanear.')
+                return False
+            # status code 200 sem QR pode significar que reconectou
+            print(f'[WA] Reconexão: resposta sem QR → {data}')
+            time.sleep(3)
+            status = get_status()
+            if status.get('connected'):
+                print('[WA] Reconexão automática bem-sucedida!')
+                return True
+    except Exception as e:
+        print(f'[WA] Erro na tentativa de reconexão: {e}')
+    return False
+
+
+# ─── QR Code e Conexão ───────────────────────────────────────────────────
+
 def ensure_instance_and_get_qr() -> Dict:
     """
     Garante a instância e retorna QR.
@@ -94,7 +167,7 @@ def ensure_instance_and_get_qr() -> Dict:
                 if qr:
                     return qr
                 # Se não retornou QR (ex: count: 0), a instância pode estar corrompida.
-                # Tentamos dar um POST /logout (não delete) para resetar a conexão.
+                # Tentamos dar um logout (não delete) para resetar a conexão.
                 print(f'[WA] GET /connect retornou sem QR: {data}. Resetando conexão...')
                 requests.delete(_url(f'/instance/logout/{INSTANCE}'), headers=_h(), timeout=TIMEOUT)
                 time.sleep(2)
@@ -142,7 +215,6 @@ def ensure_instance_and_get_qr() -> Dict:
         return {'error': f'Fallback HTTP {r2.status_code}'}
     except Exception as e:
         return {'error': f'Erro fallback: {e}'}
-
 
 
 def get_qr() -> Dict:
@@ -237,13 +309,41 @@ def get_chats(limit: int = 200) -> List[Dict]:
 def send_text(to: str, text: str) -> Dict:
     """
     Envia mensagem de texto para número ou grupo via Evolution API.
+
+    Implementa validação de sessão em 3 camadas:
+    1. Verificação de status (DB) — rápida
+    2. Health check real da sessão Baileys — detecta sessão morta
+    3. Tentativa de reconexão automática se sessão morta
+
     - Grupos (JID @g.us): envia o JID exatamente como está
     - Contatos: normaliza removendo +, espaços e traços, mantendo apenas dígitos
     """
-    import re
+    # ── Camada 1: Verificação de status no banco ──────────────────────────
+    status = get_status()
+    if not status.get('connected'):
+        return {
+            'ok': False,
+            'error': f'WhatsApp não está conectado (status: {status.get("status")}). '
+                     'Acesse a aba WhatsApp e escaneie o QR Code.',
+            'needs_reconnect': True,
+        }
 
+    # ── Camada 2: Health check real da sessão Baileys ────────────────────
+    if not check_session_health():
+        print('[WA] Sessão Baileys inativa (SessionError: No sessions detectado preventivamente).')
+        # ── Camada 3: Tentativa de reconexão automática ──────────────────
+        if not _try_reconnect():
+            return {
+                'ok': False,
+                'error': 'Sessão WhatsApp perdida (possivelmente após restart). '
+                         'Acesse a aba WhatsApp e reconecte escaneando o QR Code.',
+                'needs_reconnect': True,
+            }
+        # Reconectou — continua o envio
+
+    # ── Normalização do destinatário ─────────────────────────────────────
     if '@g.us' in to:
-        # Grupo — o JID deve ser enviado inteiro (ex: 12345678@g.us)
+        # Grupo — o JID deve ser enviado inteiro (ex: 12345678901234567890@g.us)
         numero = to.strip()
     elif '@s.whatsapp.net' in to:
         # JID completo de contato — extrai só os dígitos antes do @
@@ -266,18 +366,33 @@ def send_text(to: str, text: str) -> Dict:
             timeout=30
         )
         print(f'[WA] Resposta: HTTP {r.status_code} — {r.text[:300]}')
+
         if r.ok:
             return {'ok': True, 'data': r.json()}
-        # Detalha o erro para diagnóstico
+
+        # ── Tratamento especial: SessionError: No sessions ────────────────
+        # Mesmo com health check, pode ocorrer em race condition.
+        # Se detectado, sinaliza para o chamador que precisa reconectar.
         try:
             err_body = r.json()
         except Exception:
             err_body = r.text[:300]
+
+        err_str = str(err_body).lower()
+        if 'no sessions' in err_str or 'session' in err_str and r.status_code == 400:
+            print(f'[WA] SessionError detectado — instância provavelmente perdeu sessão após restart.')
+            return {
+                'ok': False,
+                'error': 'Sessão WhatsApp expirada. Reconecte escaneando o QR Code na aba WhatsApp.',
+                'needs_reconnect': True,
+                'raw': err_body,
+            }
+
         return {'ok': False, 'error': f'HTTP {r.status_code}: {err_body}'}
+
     except Exception as e:
         print(f'[WA] Exceção em send_text: {e}')
         return {'ok': False, 'error': str(e)}
-
 
 
 def is_evolution_online() -> bool:

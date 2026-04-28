@@ -106,9 +106,16 @@ def _whatsapp_job(app):
 
             result = wa_client.send_text(cfg.destinatario_id, resumo)
             cfg.ultimo_envio  = datetime.now(timezone.utc)
-            cfg.ultimo_status = 'enviado' if result.get('ok') else 'erro'
+            if result.get('ok'):
+                cfg.ultimo_status = 'enviado'
+                print(f'[WA] Resumo enviado para {cfg.destinatario_nome} as {hm}.')
+            elif result.get('needs_reconnect'):
+                cfg.ultimo_status = 'sessao_expirada'
+                print(f'[WA] AVISO: Sessão expirada. Reconecte o WhatsApp na aba correspondente.')
+            else:
+                cfg.ultimo_status = 'erro'
+                print(f'[WA] Erro no envio: {result.get("error")}')
             db.session.commit()
-            print(f'[WA] Resumo enviado para {cfg.destinatario_nome} as {hm}: {cfg.ultimo_status}')
 
         except Exception as e:
             print(f'[WA] Erro no job de envio automatico: {e}')
