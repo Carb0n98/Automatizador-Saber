@@ -162,56 +162,83 @@ def executar_coleta(app, origem='automatico'):
 
             driver.quit()
 
-            # ──────────────── Salvar no banco ────────────────
+            # ──────────────── Sincronização Inteligente ────────────────
+            # Estratégia: comparar conjunto do SABER com banco para
+            # INSERT (novos), UPDATE (status mudou), DELETE (desligados).
+            # Marcações manuais de 'apto' feitas na UI são preservadas.
             hoje = date.today()
             novos = 0
             atualizados = 0
-            ignorados = 0
+            removidos = 0
 
+            # Chave de identidade: (nome, data_verificacao)
+            # Usando o mês da data de verificação do dado coletado
+            saber_keys = set()
             for d in todos_dados:
-                # Determina status a partir do que veio do SABER
-                status_final = 'apto' if d['status_raw'] == 'APTO' else 'pendente'
+                try:
+                    data_verif = datetime.strptime(d['data'], '%d/%m/%Y').date()
+                except Exception:
+                    data_verif = hoje
+                saber_keys.add((d['nome'], data_verif))
 
+            # INSERT / UPDATE: processa cada linha coletada do SABER
+            for d in todos_dados:
+                status_saber = 'apto' if d['status_raw'] == 'APTO' else 'pendente'
                 try:
                     data_verif = datetime.strptime(d['data'], '%d/%m/%Y').date()
                 except Exception:
                     data_verif = hoje
 
-                # Verifica se já existe no banco (mesmo nome + mesma data)
                 existe = Verificacao.query.filter_by(
                     nome=d['nome'],
                     data_verificacao=data_verif
                 ).first()
 
                 if existe:
-                    # Se o SABER agora marca como APTO e o banco ainda tem pendente → atualiza
-                    if status_final == 'apto' and existe.status != 'apto':
+                    # Só atualiza status se o SABER mudou para APTO
+                    # (nunca rebaixa uma marcação manual de APTO para pendente)
+                    if status_saber == 'apto' and existe.status != 'apto':
                         existe.status = 'apto'
+                        # Atualiza cargo/atividade caso tenham mudado no SABER
+                        existe.cargo = d['cargo']
+                        existe.atividade = d['atividade']
                         atualizados += 1
-                    else:
-                        ignorados += 1  # Sem mudança relevante, ignora
-                    continue
+                else:
+                    # Funcionário novo no SABER ou nova data de verificação
+                    db.session.add(Verificacao(
+                        nome=d['nome'],
+                        cargo=d['cargo'],
+                        atividade=d['atividade'],
+                        data_verificacao=data_verif,
+                        status=status_saber,
+                        origem=origem,
+                    ))
+                    novos += 1
 
-                # Registro novo — salva com o status correto (pendente OU apto)
-                db.session.add(Verificacao(
-                    nome=d['nome'],
-                    cargo=d['cargo'],
-                    atividade=d['atividade'],
-                    data_verificacao=data_verif,
-                    status=status_final,
-                    origem=origem,
-                ))
-                novos += 1
+            # DELETE: remove do banco quem não veio mais no SABER
+            # Escopo: apenas registros com data de verificação dentro do mês atual
+            # (não toca registros históricos de meses anteriores)
+            from sqlalchemy import extract as sa_extract
+            registros_mes = Verificacao.query.filter(
+                sa_extract('month', Verificacao.data_verificacao) == hoje.month,
+                sa_extract('year',  Verificacao.data_verificacao) == hoje.year,
+            ).all()
+
+            for reg in registros_mes:
+                chave = (reg.nome, reg.data_verificacao)
+                if chave not in saber_keys:
+                    db.session.delete(reg)
+                    removidos += 1
 
             db.session.commit()
 
-            msg = (f'{novos} novos registros. '
+            msg = (f'{novos} novos. '
                    f'{atualizados} atualizados para APTO. '
-                   f'{ignorados} duplicatas ignoradas.')
+                   f'{removidos} removidos (desligados/não encontrados no SABER).')
             _finalizar_log(db, LogAutomacao, log_id, 'sucesso', novos + atualizados, msg)
             _is_running = False
             _scraping_lock.release()
-            return {'status': 'sucesso', 'total': len(todos_dados), 'novos': novos, 'ignorados': ignorados}
+            return {'status': 'sucesso', 'total': len(todos_dados), 'novos': novos, 'removidos': removidos}
 
         except Exception as e:
             # Fix #1: só chama quit() se driver foi realmente criado

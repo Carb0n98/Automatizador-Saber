@@ -34,7 +34,7 @@ def index():
         linhas.append("")
 
     if vencem_hoje:
-        linhas.append("\U0001f4c5 HOJE")
+        linhas.append("\U0001f4c5 N\u00c3O VERIFICADOS HOJE")
         for v in vencem_hoje:
             cargo = v.cargo or 'Sem cargo'
             ativ = v.atividade or 'Sem atividade'

@@ -30,11 +30,13 @@ def index():
 
     progresso_pct = int((aptos_mes / total_mes) * 100) if total_mes > 0 else 0
 
-    total_hoje = Verificacao.query.filter(
-        Verificacao.data_verificacao == hoje
+    # Card "Hoje" dinâmico: apenas pendentes do dia (diminui conforme são concluídos)
+    nao_verificados_hoje = Verificacao.query.filter(
+        Verificacao.data_verificacao == hoje,
+        Verificacao.status == 'pendente'
     ).count()
 
-    pendentes = Verificacao.query.filter_by(status='pendente').count()
+    nao_verificados = Verificacao.query.filter_by(status='pendente').count()
     aptos = Verificacao.query.filter_by(status='apto').count()
 
     # Atrasados: pendentes com data anterior a hoje
@@ -58,8 +60,8 @@ def index():
         total_mes=total_mes,
         aptos_mes=aptos_mes,
         progresso_pct=progresso_pct,
-        total_hoje=total_hoje,
-        pendentes=pendentes,
+        nao_verificados_hoje=nao_verificados_hoje,
+        nao_verificados=nao_verificados,
         aptos=aptos,
         atrasados=atrasados,
         ultimo_log=ultimo_log,

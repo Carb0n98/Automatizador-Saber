@@ -139,17 +139,17 @@
       <div class="stat-label">Hoje</div>
       <div class="stat-icon"><i class="bi bi-calendar-check"></i></div>
     </div>
-    <div class="stat-value" id="statHoje">{{ total_hoje }}</div>
-    <div class="stat-footer">Vencimentos para hoje</div>
+    <div class="stat-value" id="statHoje">{{ nao_verificados_hoje }}</div>
+    <div class="stat-footer">Não verificados para hoje</div>
   </div>
 
   <div class="stat-card amber">
     <div class="stat-top">
-      <div class="stat-label">Pendentes</div>
+      <div class="stat-label">Não Verificados</div>
       <div class="stat-icon"><i class="bi bi-hourglass-split"></i></div>
     </div>
-    <div class="stat-value" id="statPendentes">{{ pendentes }}</div>
-    <div class="stat-footer">Aguardando conclusão</div>
+    <div class="stat-value" id="statPendentes">{{ nao_verificados }}</div>
+    <div class="stat-footer">Aguardando verificação</div>
   </div>
 
   <div class="stat-card red" style="cursor:pointer" onclick="window.location='{{ url_for('verificacoes.index') }}?tab=atrasado'" title="Ver atrasados">
