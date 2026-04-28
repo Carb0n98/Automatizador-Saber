@@ -1,8 +1,7 @@
 from flask import Blueprint, render_template, jsonify
 from flask_login import login_required, current_user
-from datetime import date
 import threading
-from ..utils import require_perm
+from ..utils import require_perm, hoje_local, now_local
 
 dashboard_bp = Blueprint('dashboard', __name__)
 
@@ -10,11 +9,13 @@ dashboard_bp = Blueprint('dashboard', __name__)
 @dashboard_bp.route('/')
 @login_required
 def index():
-    from ..models import Verificacao, LogAutomacao
+    from ..models import Verificacao, LogAutomacao, Config
     from ..extensions import db
     from sqlalchemy import extract
 
-    hoje = date.today()
+    hoje = hoje_local()
+    agora = now_local()
+    tz_nome = Config.get('timezone', 'America/Sao_Paulo')
 
     total_mes = Verificacao.query.filter(
         extract('month', Verificacao.criado_em) == hoje.month,
@@ -23,14 +24,13 @@ def index():
 
     aptos_mes = Verificacao.query.filter(
         Verificacao.status == 'apto',
-        # Fix #10: usar data_verificacao (n\u00e3o criado_em) para o m\u00eas correto
         extract('month', Verificacao.data_verificacao) == hoje.month,
         extract('year', Verificacao.data_verificacao) == hoje.year
     ).count()
 
     progresso_pct = int((aptos_mes / total_mes) * 100) if total_mes > 0 else 0
 
-    # Card "Hoje" dinâmico: apenas pendentes do dia (diminui conforme são concluídos)
+    # Card "Hoje" dinâmico: apenas pendentes do dia
     nao_verificados_hoje = Verificacao.query.filter(
         Verificacao.data_verificacao == hoje,
         Verificacao.status == 'pendente'
@@ -55,6 +55,9 @@ def index():
     next_run = get_next_run()
     scheduler_status = get_scheduler_status()
 
+    # Offset UTC em horas (ex: -3 para America/Sao_Paulo)
+    tz_offset = int(agora.utcoffset().total_seconds() // 3600) if agora.utcoffset() else -3
+
     return render_template('dashboard/index.html',
         active='dashboard',
         total_mes=total_mes,
@@ -68,6 +71,10 @@ def index():
         ultimos_logs=ultimos_logs,
         next_run=next_run,
         scheduler_status=scheduler_status,
+        tz_nome=tz_nome,
+        data_hoje=hoje.strftime('%d/%m/%Y'),
+        hora_atual=agora.strftime('%H:%M'),
+        tz_offset=tz_offset,
     )
 
 

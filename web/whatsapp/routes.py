@@ -1,15 +1,16 @@
 from flask import Blueprint, render_template, request, jsonify
 from flask_login import login_required, current_user
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone
 from ..models import WhatsappConfig, Verificacao
 from ..extensions import db
+from ..utils import hoje_local
 
 whatsapp_bp = Blueprint('whatsapp', __name__, url_prefix='/whatsapp')
 
 
 def _gerar_resumo() -> str:
-    """Gera o texto de resumo diário de atrasados e pendentes — mesma lógica de mensagens."""
-    hoje = date.today()
+    """Gera o texto de resumo diário de atrasados e não verificados."""
+    hoje = hoje_local()
 
     atrasados = Verificacao.query.filter(
         Verificacao.status == 'pendente',

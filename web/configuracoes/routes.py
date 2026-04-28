@@ -15,6 +15,7 @@ def index():
         'saber_senha': Config.get('saber_senha', ''),
         'restaurante': Config.get('restaurante', ''),
         'telefone': Config.get('telefone', ''),
+        'timezone': Config.get('timezone', 'America/Sao_Paulo'),
     }
     return render_template('configuracoes/index.html',
         active='configuracoes',
@@ -31,7 +32,7 @@ def salvar():
     pode_saber = current_user.has_perm('editar_credenciais_saber')
     pode_tel   = current_user.has_perm('editar_telefone')
 
-    campos_saber = ['saber_url', 'saber_usuario', 'saber_senha', 'restaurante']
+    campos_saber = ['saber_url', 'saber_usuario', 'saber_senha', 'restaurante', 'timezone']
     campos_tel   = ['telefone']
 
     salvou = False
@@ -50,6 +51,23 @@ def salvar():
 
     db.session.commit()
     return jsonify({'status': 'ok', 'mensagem': 'Configurações salvas com sucesso.'})
+
+
+@configuracoes_bp.route('/api/timezone-info')
+@login_required
+def api_timezone_info():
+    """Retorna data/hora atual no fuso configurado (usado pelo relógio do dashboard)."""
+    from ..utils import now_local
+    from ..models import Config
+    agora = now_local()
+    tz_nome = Config.get('timezone', 'America/Sao_Paulo')
+    offset = int(agora.utcoffset().total_seconds() // 3600) if agora.utcoffset() else -3
+    return jsonify({
+        'data': agora.strftime('%d/%m/%Y'),
+        'hora': agora.strftime('%H:%M:%S'),
+        'tz': tz_nome,
+        'offset': offset,
+    })
 
 
 @configuracoes_bp.route('/api/testar', methods=['POST'])

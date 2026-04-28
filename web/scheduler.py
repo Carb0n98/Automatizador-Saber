@@ -56,7 +56,7 @@ def _whatsapp_job(app):
         try:
             from .models import WhatsappConfig, Verificacao
             from .extensions import db
-            from datetime import date, timezone
+            from datetime import timezone
 
             cfg = WhatsappConfig.query.first()
             if not cfg:
@@ -70,7 +70,8 @@ def _whatsapp_job(app):
                 return
 
             # Gera resumo
-            hoje     = date.today()
+            from .utils import hoje_local
+            hoje = hoje_local()
             atrasados = Verificacao.query.filter(
                 Verificacao.status == 'pendente',
                 Verificacao.data_verificacao < hoje

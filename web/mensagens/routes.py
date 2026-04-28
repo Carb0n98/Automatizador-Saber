@@ -2,7 +2,7 @@ from flask import Blueprint, render_template, request, jsonify
 from flask_login import login_required
 from ..models import Mensagem, Verificacao
 from ..extensions import db
-from datetime import date
+from ..utils import hoje_local
 
 mensagens_bp = Blueprint('mensagens', __name__, url_prefix='/mensagens')
 
@@ -10,7 +10,7 @@ mensagens_bp = Blueprint('mensagens', __name__, url_prefix='/mensagens')
 @mensagens_bp.route('/')
 @login_required
 def index():
-    hoje = date.today()
+    hoje = hoje_local()
     
     atrasados = Verificacao.query.filter(
         Verificacao.status == 'pendente',

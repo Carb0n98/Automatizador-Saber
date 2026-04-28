@@ -1,9 +1,38 @@
 """
-Utilitários compartilhados: migração automática de colunas e sistema de permissões.
+Utilitários compartilhados: migração automática de colunas, sistema de permissões
+e helpers de data/hora no fuso horário configurado.
 """
 from functools import wraps
 from flask import abort, flash, redirect, url_for, jsonify, request
 from flask_login import current_user
+
+
+# ─── Helpers de data/hora com fuso horário correto ──────────────────────────
+def _get_tz():
+    """Retorna o objeto ZoneInfo do fuso configurado no banco."""
+    from zoneinfo import ZoneInfo
+    try:
+        from .models import Config
+        tz_str = Config.get('timezone', 'America/Sao_Paulo')
+    except Exception:
+        tz_str = 'America/Sao_Paulo'
+    try:
+        return ZoneInfo(tz_str)
+    except Exception:
+        return ZoneInfo('America/Sao_Paulo')
+
+
+def hoje_local():
+    """Retorna date.today() no fuso horário configurado (evita avanço de dia em UTC)."""
+    from datetime import datetime
+    return datetime.now(_get_tz()).date()
+
+
+def now_local():
+    """Retorna datetime.now() no fuso horário configurado."""
+    from datetime import datetime
+    return datetime.now(_get_tz())
+
 
 # ─── Catálogo de permissões disponíveis no sistema ─────────────────────────
 PERMISSIONS = {

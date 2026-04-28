@@ -2,7 +2,7 @@
 Tarefa de coleta de dados do sistema SABER via Selenium.
 Chamada pelo scheduler diário (07:00) e pelo botão de busca manual.
 """
-from datetime import datetime, date
+from datetime import datetime
 import threading
 
 # Lock to prevent concurrent scraping runs
@@ -42,6 +42,7 @@ def executar_coleta(app, origem='automatico'):
 
     with app.app_context():
         from .models import db, Config, Verificacao, LogAutomacao
+        from .utils import hoje_local
 
         # Cria log de execução inicial
         log = LogAutomacao(
@@ -166,7 +167,7 @@ def executar_coleta(app, origem='automatico'):
             # Estratégia: comparar conjunto do SABER com banco para
             # INSERT (novos), UPDATE (status mudou), DELETE (desligados).
             # Marcações manuais de 'apto' feitas na UI são preservadas.
-            hoje = date.today()
+            hoje = hoje_local()
             novos = 0
             atualizados = 0
             removidos = 0

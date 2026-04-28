@@ -90,15 +90,16 @@
       Automação {{ scheduler_status | title }}
     </div>
     <div class="sch-sub">
-      Próxima execução automática: <strong>{{ next_run }}</strong> &nbsp;|&nbsp;
-      Executa diariamente às <strong>07:00</strong>
+      Próxima execução: <strong>{{ next_run }}</strong>
+      &nbsp;|&nbsp; Executa às <strong>07:00</strong>
+      &nbsp;|&nbsp;
+      <i class="bi bi-globe2" style="color:var(--primary-l)"></i>
+      <strong>{{ tz_nome }}</strong>
     </div>
   </div>
-  <div>
-    <span class="badge badge-{{ 'success' if scheduler_status == 'ativa' else 'danger' }}">
-      <i class="bi bi-{{ 'check-circle' if scheduler_status == 'ativa' else 'x-circle' }}"></i>
-      {{ scheduler_status | upper }}
-    </span>
+  <div style="text-align:right;flex-shrink:0">
+    <div style="font-size:22px;font-weight:700;color:var(--text);letter-spacing:1px;font-variant-numeric:tabular-nums" id="relogioHora">{{ hora_atual }}</div>
+    <div style="font-size:12px;color:var(--text-m);margin-top:2px">{{ data_hoje }}</div>
   </div>
 </div>
 
@@ -357,7 +358,23 @@ async function refreshStatus() {
   }
 }
 
-// Check on page load if something is running
+// ── Relógio em tempo real (usa offset UTC calculado pelo servidor) ──────────
+(function() {
+  const tzOffset = {{ tz_offset }};  // horas (ex: -3)
+  function tick() {
+    const now = new Date();
+    // Ajusta para o fuso do servidor
+    const local = new Date(now.getTime() + (tzOffset * 3600000) + (now.getTimezoneOffset() * 60000));
+    const hh = String(local.getHours()).padStart(2,'0');
+    const mm = String(local.getMinutes()).padStart(2,'0');
+    const ss = String(local.getSeconds()).padStart(2,'0');
+    const el = document.getElementById('relogioHora');
+    if (el) el.textContent = `${hh}:${mm}:${ss}`;
+  }
+  tick();
+  setInterval(tick, 1000);
+})();
+
 (async () => {
   const r = await fetch('/api/status');
   const data = await r.json();

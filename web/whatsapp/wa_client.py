@@ -235,21 +235,49 @@ def get_chats(limit: int = 200) -> List[Dict]:
 # ─── Envio de Mensagem ────────────────────────────────────────────────────
 
 def send_text(to: str, text: str) -> Dict:
-    """Envia mensagem de texto para número ou grupo."""
-    if '@' not in to:
-        to = to.replace('+', '').replace(' ', '').replace('-', '')
+    """
+    Envia mensagem de texto para número ou grupo via Evolution API.
+    - Grupos (JID @g.us): envia o JID exatamente como está
+    - Contatos: normaliza removendo +, espaços e traços, mantendo apenas dígitos
+    """
+    import re
+
+    if '@g.us' in to:
+        # Grupo — o JID deve ser enviado inteiro (ex: 12345678@g.us)
+        numero = to.strip()
+    elif '@s.whatsapp.net' in to:
+        # JID completo de contato — extrai só os dígitos antes do @
+        numero = re.sub(r'[^0-9]', '', to.split('@')[0])
+    else:
+        # Número avulso — normaliza: remove +, espaços, traços, parênteses
+        numero = re.sub(r'[^0-9]', '', to)
+
+    if not numero:
+        return {'ok': False, 'error': 'Número/JID inválido após normalização.'}
+
+    payload = {'number': numero, 'text': text}
+    print(f'[WA] send_text → número: {numero!r} | preview: {text[:60]!r}')
+
     try:
         r = requests.post(
             _url(f'/message/sendText/{INSTANCE}'),
             headers=_h(),
-            json={'number': to, 'text': text},
+            json=payload,
             timeout=30
         )
+        print(f'[WA] Resposta: HTTP {r.status_code} — {r.text[:300]}')
         if r.ok:
             return {'ok': True, 'data': r.json()}
-        return {'ok': False, 'error': f'HTTP {r.status_code}: {r.text[:200]}'}
+        # Detalha o erro para diagnóstico
+        try:
+            err_body = r.json()
+        except Exception:
+            err_body = r.text[:300]
+        return {'ok': False, 'error': f'HTTP {r.status_code}: {err_body}'}
     except Exception as e:
+        print(f'[WA] Exceção em send_text: {e}')
         return {'ok': False, 'error': str(e)}
+
 
 
 def is_evolution_online() -> bool:
