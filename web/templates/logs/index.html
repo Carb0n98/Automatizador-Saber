@@ -1,0 +1,457 @@
+{% extends "base.html" %}
+
+{% block title %}Logs do Sistema{% endblock %}
+{% block page_title %}Logs do Sistema{% endblock %}
+{% block page_subtitle %}Monitoramento de eventos, erros e integrações em tempo real{% endblock %}
+
+{% block topbar_actions %}
+  <div style="font-size:12.5px;color:var(--text-m)" id="tableInfo">Carregando...</div>
+  {% if current_user.is_admin %}
+  <button class="btn btn-ghost btn-sm" onclick="abrirPurge()" title="Remover logs antigos">
+    <i class="bi bi-trash3"></i> Limpar Logs
+  </button>
+  {% endif %}
+  <button class="btn btn-ghost btn-sm" onclick="loadData()" title="Atualizar">
+    <i class="bi bi-arrow-clockwise"></i>
+  </button>
+{% endblock %}
+
+{% block extra_css %}
+/* ── Cards de resumo ── */
+.log-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+@media (max-width: 900px) { .log-summary-grid { grid-template-columns: repeat(2,1fr); } }
+@media (max-width: 500px) { .log-summary-grid { grid-template-columns: 1fr; } }
+
+.log-stat {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.log-stat-icon {
+  width: 42px; height: 42px;
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; flex-shrink: 0;
+}
+.log-stat-icon.total   { background: rgba(124,58,237,0.12); color: var(--primary-l); }
+.log-stat-icon.error   { background: rgba(239,68,68,0.12);  color: #f87171; }
+.log-stat-icon.warning { background: rgba(245,158,11,0.12); color: #fbbf24; }
+.log-stat-icon.info    { background: rgba(56,189,248,0.12); color: #38bdf8; }
+
+.log-stat-val  { font-size: 26px; font-weight: 800; color: var(--text); line-height: 1; }
+.log-stat-lbl  { font-size: 12px; color: var(--text-m); margin-top: 3px; }
+
+/* ── Filtros ── */
+.filters-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 18px;
+}
+.filters-bar input,
+.filters-bar select {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  padding: 7px 11px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.filters-bar input:focus,
+.filters-bar select:focus { border-color: var(--primary); }
+
+.search-wrap { position: relative; flex: 1; min-width: 200px; }
+.search-wrap i { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--text-d); font-size: 13px; }
+.search-wrap input { width: 100%; padding-left: 32px; }
+
+/* ── Badge de nível ── */
+.badge-level-error   { background: rgba(239,68,68,0.15);  color: #f87171; border: 1px solid rgba(239,68,68,0.3); }
+.badge-level-warning { background: rgba(245,158,11,0.15); color: #fbbf24; border: 1px solid rgba(245,158,11,0.3); }
+.badge-level-info    { background: rgba(56,189,248,0.12); color: #38bdf8; border: 1px solid rgba(56,189,248,0.25); }
+.badge-level-debug   { background: rgba(107,114,128,0.12); color: var(--text-d); border: 1px solid var(--border); }
+
+/* ── Linha detalhe expandível ── */
+.detail-row td {
+  padding: 0 !important;
+  background: var(--surface-2) !important;
+}
+.detail-inner {
+  padding: 10px 20px 12px 36px;
+  font-size: 12px;
+  font-family: 'Courier New', monospace;
+  color: var(--text-m);
+  white-space: pre-wrap;
+  word-break: break-all;
+  border-bottom: 1px solid var(--border);
+}
+.toggle-detail {
+  background: none;
+  border: none;
+  color: var(--text-d);
+  cursor: pointer;
+  padding: 0 4px;
+  font-size: 13px;
+  line-height: 1;
+  transition: color 0.15s;
+}
+.toggle-detail:hover { color: var(--primary-l); }
+
+/* ── Polling indicator ── */
+#pollingDot {
+  display: inline-block;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+  margin-left: 6px;
+  animation: pulse 2s infinite;
+}
+
+/* ── Modal purge ── */
+.modal-purge { max-width: 420px; }
+{% endblock %}
+
+{% block content %}
+
+<!-- Cards resumo 24h -->
+<div class="log-summary-grid">
+  <div class="log-stat">
+    <div class="log-stat-icon total"><i class="bi bi-journal-text"></i></div>
+    <div>
+      <div class="log-stat-val" id="cardTotal">{{ total_24h }}</div>
+      <div class="log-stat-lbl">Total (24h)</div>
+    </div>
+  </div>
+  <div class="log-stat">
+    <div class="log-stat-icon error"><i class="bi bi-x-circle-fill"></i></div>
+    <div>
+      <div class="log-stat-val" id="cardErros">{{ erros_24h }}</div>
+      <div class="log-stat-lbl">Erros (24h)</div>
+    </div>
+  </div>
+  <div class="log-stat">
+    <div class="log-stat-icon warning"><i class="bi bi-exclamation-triangle-fill"></i></div>
+    <div>
+      <div class="log-stat-val" id="cardWarns">{{ warns_24h }}</div>
+      <div class="log-stat-lbl">Avisos (24h)</div>
+    </div>
+  </div>
+  <div class="log-stat">
+    <div class="log-stat-icon info"><i class="bi bi-info-circle-fill"></i></div>
+    <div>
+      <div class="log-stat-val" id="cardInfo">{{ info_24h }}</div>
+      <div class="log-stat-lbl">Info (24h)</div>
+    </div>
+  </div>
+</div>
+
+<!-- Filtros -->
+<div class="filters-bar">
+  <div class="search-wrap">
+    <i class="bi bi-search"></i>
+    <input type="text" id="filterQ" placeholder="Buscar em mensagem ou detalhe..." oninput="debounce()"/>
+  </div>
+
+  <select id="filterNivel" onchange="resetAndLoad()">
+    <option value="">Todos os níveis</option>
+    <option value="ERROR">🔴 ERROR</option>
+    <option value="WARNING">🟡 WARNING</option>
+    <option value="INFO">🔵 INFO</option>
+    <option value="DEBUG">⚪ DEBUG</option>
+  </select>
+
+  <select id="filterOrigem" onchange="resetAndLoad()">
+    <option value="">Todas as origens</option>
+    {% for o in origens %}
+    <option value="{{ o }}">{{ o }}</option>
+    {% endfor %}
+  </select>
+
+  <input type="date" id="filterDe"  onchange="resetAndLoad()" title="De"/>
+  <input type="date" id="filterAte" onchange="resetAndLoad()" title="Até"/>
+
+  <button class="btn btn-ghost btn-sm" onclick="limparFiltros()">
+    <i class="bi bi-x-circle"></i> Limpar
+  </button>
+
+  <span style="margin-left:auto;font-size:12px;color:var(--text-d)">
+    Auto-refresh 30s <span id="pollingDot"></span>
+  </span>
+</div>
+
+<!-- Tabela -->
+<div class="card" style="padding:0">
+  <div class="table-wrapper">
+    <table id="logsTable">
+      <thead>
+        <tr>
+          <th style="width:32px"></th>
+          <th style="width:155px">Data/Hora</th>
+          <th style="width:90px">Nível</th>
+          <th style="width:110px">Origem</th>
+          <th>Mensagem</th>
+          <th style="width:90px">Usuário</th>
+        </tr>
+      </thead>
+      <tbody id="tableBody">
+        <tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-d)">
+          <span class="spinner" style="border-color:rgba(124,58,237,0.3);border-top-color:var(--primary)"></span>
+          <span style="margin-left:10px">Carregando...</span>
+        </td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="pagination" id="paginationWrap"></div>
+</div>
+
+<!-- Modal purge -->
+<div class="modal-overlay" id="purgeModal">
+  <div class="modal-box modal-purge">
+    <div class="modal-header">
+      <span class="modal-title"><i class="bi bi-trash3"></i> Limpar Logs</span>
+      <button class="modal-close" onclick="closePurge()">&times;</button>
+    </div>
+    <p style="color:var(--text-m);font-size:13.5px;margin-bottom:16px">
+      Remove permanentemente todos os logs mais antigos que o período selecionado.
+    </p>
+    <div class="form-group">
+      <label>Remover logs com mais de:</label>
+      <select id="purgedays" style="width:100%;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px 12px;font-size:13px">
+        <option value="7">7 dias</option>
+        <option value="15">15 dias</option>
+        <option value="30" selected>30 dias</option>
+        <option value="60">60 dias</option>
+        <option value="1">1 dia (teste)</option>
+      </select>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
+      <button class="btn btn-ghost" onclick="closePurge()">Cancelar</button>
+      <button class="btn btn-danger" onclick="executarPurge()">
+        <i class="bi bi-trash3"></i> Limpar
+      </button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let currentPage = 1;
+let debounceTimer;
+let pollingInterval;
+
+// ── Badges ────────────────────────────────────────────────────────────────
+const levelBadge = {
+  'ERROR':   '<span class="badge badge-level-error"><i class="bi bi-x-circle-fill"></i> ERROR</span>',
+  'WARNING': '<span class="badge badge-level-warning"><i class="bi bi-exclamation-triangle-fill"></i> WARNING</span>',
+  'INFO':    '<span class="badge badge-level-info"><i class="bi bi-info-circle-fill"></i> INFO</span>',
+  'DEBUG':   '<span class="badge badge-level-debug"><i class="bi bi-bug"></i> DEBUG</span>',
+};
+
+const origemBadge = o => `<span class="badge badge-purple" style="font-size:10px;font-weight:500">${esc(o)}</span>`;
+
+// ── Utilidades ────────────────────────────────────────────────────────────
+function esc(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function debounce() {
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(() => { currentPage = 1; loadData(); }, 350);
+}
+
+function resetAndLoad() { currentPage = 1; loadData(); }
+
+function limparFiltros() {
+  ['filterQ','filterNivel','filterOrigem','filterDe','filterAte'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  resetAndLoad();
+}
+
+// ── Carregamento de dados ─────────────────────────────────────────────────
+async function loadData() {
+  const params = new URLSearchParams({
+    q:        document.getElementById('filterQ').value,
+    nivel:    document.getElementById('filterNivel').value,
+    origem:   document.getElementById('filterOrigem').value,
+    data_de:  document.getElementById('filterDe').value,
+    data_ate: document.getElementById('filterAte').value,
+    page:     currentPage,
+    per_page: 50,
+  });
+
+  document.getElementById('tableBody').innerHTML =
+    `<tr><td colspan="6" style="text-align:center;padding:32px;color:var(--text-d)">
+      <span class="spinner" style="border-color:rgba(124,58,237,0.3);border-top-color:var(--primary)"></span>
+    </td></tr>`;
+
+  try {
+    const r = await fetch('/logs/api?' + params);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    document.getElementById('tableInfo').textContent = `${data.total} evento(s)`;
+    renderTable(data.data);
+    renderPagination(data.page, data.pages, data.total);
+    // Atualiza cards de resumo
+    refreshCards();
+  } catch(e) {
+    document.getElementById('tableInfo').textContent = 'Erro ao carregar.';
+    document.getElementById('tableBody').innerHTML =
+      `<tr><td colspan="6"><div class="empty-state">
+        <i class="bi bi-wifi-off"></i><h3>Falha na conexão</h3>
+        <p>Verifique se o servidor está ativo.</p>
+        <button class="btn btn-ghost" style="margin-top:12px" onclick="loadData()">
+          <i class="bi bi-arrow-clockwise"></i> Tentar novamente
+        </button>
+      </div></td></tr>`;
+  }
+}
+
+async function refreshCards() {
+  try {
+    const r = await fetch('/logs/api/resumo');
+    if (!r.ok) return;
+    const d = await r.json();
+    document.getElementById('cardTotal').textContent = d.total_24h;
+    document.getElementById('cardErros').textContent = d.erros_24h;
+    document.getElementById('cardWarns').textContent = d.warns_24h;
+    document.getElementById('cardInfo').textContent  = d.info_24h;
+  } catch {}
+}
+
+// ── Renderização da tabela ────────────────────────────────────────────────
+function renderTable(rows) {
+  const tbody = document.getElementById('tableBody');
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state">
+      <i class="bi bi-journal-x"></i>
+      <h3>Nenhum log encontrado</h3>
+      <p>Tente ajustar os filtros ou aguarde novos eventos.</p>
+    </div></td></tr>`;
+    return;
+  }
+
+  const html = rows.flatMap(log => {
+    const hasDetail = log.detalhe && log.detalhe.trim();
+    const rowId = `row-${log.id}`;
+    const detailId = `detail-${log.id}`;
+
+    const mainRow = `<tr id="${rowId}">
+      <td style="padding:10px 6px 10px 14px">
+        ${hasDetail ? `<button class="toggle-detail" onclick="toggleDetail('${detailId}')" title="Ver detalhe">
+          <i class="bi bi-chevron-right" id="icon-${log.id}"></i>
+        </button>` : ''}
+      </td>
+      <td style="white-space:nowrap;font-size:12px;color:var(--text-m)">${esc(log.criado_em)}</td>
+      <td>${levelBadge[log.nivel] || esc(log.nivel)}</td>
+      <td>${origemBadge(log.origem)}</td>
+      <td style="max-width:500px;word-break:break-word">${esc(log.mensagem)}</td>
+      <td style="font-size:12px;color:var(--text-d)">${esc(log.usuario)}</td>
+    </tr>`;
+
+    const detailRow = hasDetail ? `<tr class="detail-row" id="${detailId}" style="display:none">
+      <td colspan="6"><div class="detail-inner">${esc(log.detalhe)}</div></td>
+    </tr>` : '';
+
+    return [mainRow, detailRow];
+  }).join('');
+
+  tbody.innerHTML = html;
+}
+
+function toggleDetail(id) {
+  const row = document.getElementById(id);
+  if (!row) return;
+  const logId = id.replace('detail-', '');
+  const icon = document.getElementById(`icon-${logId}`);
+  const visible = row.style.display !== 'none';
+  row.style.display = visible ? 'none' : 'table-row';
+  if (icon) {
+    icon.className = visible ? 'bi bi-chevron-right' : 'bi bi-chevron-down';
+  }
+}
+
+// ── Paginação ─────────────────────────────────────────────────────────────
+function renderPagination(page, pages, total) {
+  const wrap = document.getElementById('paginationWrap');
+  if (pages <= 1) { wrap.innerHTML = ''; return; }
+  let html = `<button class="page-btn" onclick="goPage(${page-1})" ${page<=1?'disabled':''}><i class="bi bi-chevron-left"></i></button>`;
+  for (let i = Math.max(1,page-2); i <= Math.min(pages,page+2); i++) {
+    html += `<button class="page-btn ${i===page?'active':''}" onclick="goPage(${i})">${i}</button>`;
+  }
+  html += `<button class="page-btn" onclick="goPage(${page+1})" ${page>=pages?'disabled':''}><i class="bi bi-chevron-right"></i></button>`;
+  wrap.innerHTML = html;
+}
+
+function goPage(p) { currentPage = p; loadData(); }
+
+// ── Modal Purge ───────────────────────────────────────────────────────────
+function abrirPurge() { document.getElementById('purgeModal').classList.add('show'); }
+function closePurge() { document.getElementById('purgeModal').classList.remove('show'); }
+
+async function executarPurge() {
+  const days = parseInt(document.getElementById('purgedays').value);
+  closePurge();
+  try {
+    const r = await fetch('/logs/api/purge', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ days }),
+    });
+    const d = await r.json();
+    showToast(d.mensagem || 'Limpeza concluída.', r.ok ? 'success' : 'error');
+    loadData();
+  } catch(e) {
+    showToast('Erro ao limpar logs: ' + e.message, 'error');
+  }
+}
+
+document.getElementById('purgeModal').addEventListener('click', function(e) {
+  if (e.target === this) closePurge();
+});
+
+// ── Captura global de erros JS → envia para o backend ────────────────────
+window.addEventListener('error', function(e) {
+  fetch('/logs/api/frontend', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({
+      nivel: 'ERROR',
+      mensagem: `${e.message} (${e.filename}:${e.lineno})`,
+      detalhe: e.error ? e.error.stack : null,
+    }),
+  }).catch(() => {});
+});
+
+// ── Polling automático 30s ────────────────────────────────────────────────
+function startPolling() {
+  pollingInterval = setInterval(() => {
+    loadData();
+  }, 30000);
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────
+loadData();
+startPolling();
+</script>
+{% endblock %}

@@ -43,7 +43,9 @@ desktop.ini
 
 # ── Logs ───────────────────────────────────────────────────
 *.log
-logs/
+/logs/
+# Não ignorar o módulo Python de logs (blueprint da aplicação)
+!/web/logs/
 
 # ── Selenium / Chrome ──────────────────────────────────────
 chromedriver
