@@ -11,12 +11,21 @@ _scheduler = BackgroundScheduler(timezone='America/Sao_Paulo')
 def init_scheduler(app):
     from .tasks import executar_coleta
 
+    def _coleta_e_purge():
+        executar_coleta(app, 'automatico')
+        # Limpeza automática de logs antigos (30 dias padrão)
+        with app.app_context():
+            try:
+                from .logger import purge_old_logs
+                purge_old_logs(30)
+            except Exception as e:
+                print(f'[SCHEDULER] Erro no purge de logs: {e}')
+
     _scheduler.add_job(
-        func=executar_coleta,
-        args=[app, 'automatico'],
+        func=_coleta_e_purge,
         trigger=CronTrigger(hour=7, minute=0),
         id='coleta_diaria',
-        name='Coleta Diaria SABER',
+        name='Coleta Diaria SABER + Purge Logs',
         replace_existing=True,
         misfire_grace_time=3600,
     )
@@ -108,13 +117,19 @@ def _whatsapp_job(app):
             cfg.ultimo_envio  = datetime.now(timezone.utc)
             if result.get('ok'):
                 cfg.ultimo_status = 'enviado'
+                from .logger import log_info
+                log_info(f'Resumo WhatsApp enviado para {cfg.destinatario_nome}.', origem='whatsapp')
                 print(f'[WA] Resumo enviado para {cfg.destinatario_nome} as {hm}.')
             elif result.get('needs_reconnect'):
                 cfg.ultimo_status = 'sessao_expirada'
-                print(f'[WA] AVISO: Sessão expirada. Reconecte o WhatsApp na aba correspondente.')
+                from .logger import log_warn
+                log_warn('Envio automatico falhou: sessao WhatsApp expirada.', origem='whatsapp')
+                print(f'[WA] AVISO: Sessao expirada. Reconecte o WhatsApp.')
             else:
                 cfg.ultimo_status = 'erro'
-                print(f'[WA] Erro no envio: {result.get("error")}')
+                from .logger import log_error
+                log_error(f'Erro no envio automatico WhatsApp: {result.get("error")}', origem='whatsapp')
+                print(f'[WA] Erro no envio.')
             db.session.commit()
 
         except Exception as e:

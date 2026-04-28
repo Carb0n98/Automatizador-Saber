@@ -1050,6 +1050,14 @@
         Configurações
       </a>
 
+      {% if current_user.is_admin or current_user.has_perm('ver_logs') %}
+      <a href="{{ url_for('logs.index') }}"
+         class="nav-item {% if active == 'logs' %}active{% endif %}">
+        <i class="bi bi-journal-text"></i>
+        Logs do Sistema
+      </a>
+      {% endif %}
+
       {% if current_user.is_admin %}
       <div class="nav-section">Administração</div>
 

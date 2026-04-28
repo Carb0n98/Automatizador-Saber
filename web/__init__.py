@@ -40,6 +40,7 @@ def create_app():
     from .configuracoes.routes import configuracoes_bp
     from .usuarios.routes import usuarios_bp
     from .whatsapp.routes import whatsapp_bp
+    from .logs.routes import logs_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(dashboard_bp)
@@ -48,14 +49,34 @@ def create_app():
     app.register_blueprint(configuracoes_bp)
     app.register_blueprint(usuarios_bp)
     app.register_blueprint(whatsapp_bp)
+    app.register_blueprint(logs_bp)
 
     # DB + migrações automáticas + seed
     with app.app_context():
         db.create_all()
         from .utils import migrate_user_columns
-        migrate_user_columns(db)  # Adiciona colunas novas se não existirem
+        migrate_user_columns(db)
         _seed_admin()
         _seed_default_config()
+
+    # Handler global: persiste exceções não tratadas no painel de logs
+    @app.errorhandler(Exception)
+    def handle_unhandled_exception(e):
+        import traceback
+        from flask import request as req
+        # Não loga erros 4xx (são esperados)
+        code = getattr(e, 'code', 500)
+        if isinstance(code, int) and code < 500:
+            raise e
+        try:
+            from .logger import log_error
+            log_error(
+                f'{req.method} {req.path} → {type(e).__name__}: {e}',
+                exc=e, origem='backend'
+            )
+        except Exception:
+            pass
+        raise e
 
     # Scheduler (daily at 07:00)
     from .scheduler import init_scheduler

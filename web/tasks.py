@@ -43,6 +43,7 @@ def executar_coleta(app, origem='automatico'):
     with app.app_context():
         from .models import db, Config, Verificacao, LogAutomacao
         from .utils import hoje_local
+        from .logger import log_info, log_error
 
         # Cria log de execução inicial
         log = LogAutomacao(
@@ -53,6 +54,7 @@ def executar_coleta(app, origem='automatico'):
         db.session.add(log)
         db.session.commit()
         log_id = log.id
+        log_info('Coleta SABER iniciada.', origem='scheduler')
 
         try:
             url = Config.get('saber_url', 'https://adtalento.com/websiteSaber')
@@ -237,6 +239,7 @@ def executar_coleta(app, origem='automatico'):
                    f'{atualizados} atualizados para APTO. '
                    f'{removidos} removidos (desligados/não encontrados no SABER).')
             _finalizar_log(db, LogAutomacao, log_id, 'sucesso', novos + atualizados, msg)
+            log_info(msg, origem='scheduler')
             _is_running = False
             _scraping_lock.release()
             return {'status': 'sucesso', 'total': len(todos_dados), 'novos': novos, 'removidos': removidos}
@@ -248,7 +251,9 @@ def executar_coleta(app, origem='automatico'):
                     driver.quit()
                 except Exception:
                     pass
+            import traceback as _tb
             _finalizar_log(db, LogAutomacao, log_id, 'erro', 0, str(e))
+            log_error(f'Erro na coleta SABER: {e}', origem='scheduler', detalhe=_tb.format_exc())
             _is_running = False
             _scraping_lock.release()
             return {'status': 'erro', 'mensagem': str(e)}

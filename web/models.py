@@ -4,6 +4,41 @@ import json
 from .extensions import db
 
 
+class AppLog(db.Model):
+    """Log centralizado de eventos do sistema."""
+    __tablename__ = 'app_logs'
+    id        = db.Column(db.Integer, primary_key=True)
+    criado_em = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+    nivel     = db.Column(db.String(10), default='INFO', index=True)    # DEBUG/INFO/WARNING/ERROR
+    origem    = db.Column(db.String(50), default='sistema', index=True)  # backend/whatsapp/api/scheduler/frontend
+    mensagem  = db.Column(db.Text, nullable=False)
+    detalhe   = db.Column(db.Text)       # stack trace ou contexto extra
+    usuario   = db.Column(db.String(80)) # username do autor (se ação de usuário)
+
+    def to_dict(self):
+        from .utils import now_local
+        # Converte UTC → fuso local para exibição
+        try:
+            from zoneinfo import ZoneInfo
+            from .models import Config
+            tz_str = Config.get('timezone', 'America/Sao_Paulo')
+            tz = ZoneInfo(tz_str)
+            dt_local = self.criado_em.replace(tzinfo=timezone.utc).astimezone(tz)
+            dt_str = dt_local.strftime('%d/%m/%Y %H:%M:%S')
+        except Exception:
+            dt_str = self.criado_em.strftime('%d/%m/%Y %H:%M:%S') if self.criado_em else ''
+        return {
+            'id':        self.id,
+            'criado_em': dt_str,
+            'nivel':     self.nivel,
+            'origem':    self.origem,
+            'mensagem':  self.mensagem,
+            'detalhe':   self.detalhe or '',
+            'usuario':   self.usuario or '',
+        }
+
+
+
 class User(UserMixin, db.Model):
     __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)

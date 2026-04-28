@@ -97,7 +97,12 @@ def check_session_health() -> bool:
         if r.status_code == 400:
             body = r.text.lower()
             if 'no sessions' in body or 'session' in body or 'bad session' in body:
-                print(f'[WA] Health check: sessão morta detectada → {r.text[:150]}')
+                print(f'[WA] Health check: {r.text[:150]}')
+                try:
+                    from ..logger import log_warn
+                    log_warn('Sessão Baileys morta (health check).', origem='whatsapp', detalhe=r.text[:500])
+                except Exception:
+                    pass
                 return False
         # Outros erros (404, 500) não são definitivos sobre sessão
         return r.status_code < 500
@@ -380,7 +385,13 @@ def send_text(to: str, text: str) -> Dict:
 
         err_str = str(err_body).lower()
         if 'no sessions' in err_str or 'session' in err_str and r.status_code == 400:
-            print(f'[WA] SessionError detectado — instância provavelmente perdeu sessão após restart.')
+            print(f'[WA] SessionError detectado.')
+            try:
+                from ..logger import log_error
+                log_error('SessionError: No sessions no envio.', origem='whatsapp',
+                          detalhe=f'Numero: {numero} | Resp: {err_body}')
+            except Exception:
+                pass
             return {
                 'ok': False,
                 'error': 'Sessão WhatsApp expirada. Reconecte escaneando o QR Code na aba WhatsApp.',
@@ -388,10 +399,16 @@ def send_text(to: str, text: str) -> Dict:
                 'raw': err_body,
             }
 
+        try:
+            from ..logger import log_error
+            log_error(f'Falha ao enviar mensagem: HTTP {r.status_code}', origem='whatsapp',
+                      detalhe=f'Resp: {err_body}')
+        except Exception:
+            pass
         return {'ok': False, 'error': f'HTTP {r.status_code}: {err_body}'}
 
     except Exception as e:
-        print(f'[WA] Exceção em send_text: {e}')
+        print(f'[WA] Excecao em send_text: {e}')
         return {'ok': False, 'error': str(e)}
 
 

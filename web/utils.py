@@ -43,6 +43,7 @@ PERMISSIONS = {
     'editar_credenciais_saber':'Alterar Credenciais do SABER (URL, usuário, senha)',
     'editar_telefone':         'Alterar Número de WhatsApp / Telefone',
     'gerenciar_usuarios':      'Gerenciar Usuários (somente admin)',
+    'ver_logs':                'Ver Painel de Logs do Sistema',
 }
 
 
