@@ -1,468 +1,599 @@
 """
-Adapter para WAHA (WhatsApp HTTP API) — gateway WhatsApp REST.
-Documentação: https://waha.devlike.pro/docs/
+WahaSessionManager — Gerenciador de sessão WhatsApp via WAHA HTTP API.
+Documentação WAHA: https://waha.devlike.pro/docs/
 
-Diferenças principais em relação à Evolution API:
-- 1 container único, sem PostgreSQL nem Redis
-- Engine NOWEB: sessões persistidas em disco, sem dependência de RAM
-- chatId formato: "5584999999999@c.us" (contatos), "GROUP_ID@g.us" (grupos)
-- Autenticação via header "X-Api-Key"
-- Status da sessão: STOPPED | STARTING | SCAN_QR | WORKING | FAILED
+Arquitetura:
+  - Classe WahaSessionManager com cache local de estado
+  - Decisões baseadas em estado real (state-driven), sem chamadas cegas à API
+  - Retry com backoff exponencial apenas em send_text
+  - Logs estruturados integrados ao sistema centralizado (web.logger)
 
-Arquitetura de retry:
-- send_text() tenta até MAX_RETRIES vezes com backoff exponencial
-- Health check via get_status() antes de qualquer envio
-- Log integrado via web.logger em todos os paths de erro
+Estados da sessão WAHA:
+  STOPPED   → sessão existe mas não está iniciada
+  STARTING  → iniciando (aguardar QR)
+  SCAN_QR   → QR disponível para escanear
+  WORKING   → conectado e funcionando ✅
+  FAILED    → erro — necessita reset
+  (404)     → sessão não existe ainda
+
+Regras de transição:
+  Não existe → POST /api/sessions                   → STARTING
+  STOPPED    → POST /api/sessions/{name}/start       → STARTING
+  FAILED     → POST /api/sessions/{name}/stop + start → STARTING
+  STARTING   → aguardar polling                      → SCAN_QR → WORKING
+  WORKING    → POST /api/sessions/{name}/stop        → STOPPED
+
+NUNCA:
+  - POST /api/sessions se sessão já existe (422)
+  - Solicitar QR se status for WORKING
+  - DELETE sessão ao desconectar (impede reconexão limpa)
 """
 import os
 import re
 import time
+import threading
 import requests
-from typing import Dict, List
-
-# ─── Configuração ─────────────────────────────────────────────────────────────
-BASE_URL    = os.environ.get('WAHA_BASE_URL', 'http://localhost:3000').rstrip('/')
-API_KEY     = os.environ.get('WAHA_API_KEY', 'autoverifica-waha-key-2024')
-SESSION     = 'default'   # nome da sessão WAHA (pode ser qualquer string)
-TIMEOUT     = 15
-MAX_RETRIES = 2           # tentativas extras após a primeira falha
+from typing import Dict, List, Optional
 
 
-def _h() -> Dict:
-    return {'X-Api-Key': API_KEY, 'Content-Type': 'application/json'}
+# ─── Configuração via variáveis de ambiente ────────────────────────────────────
+_BASE_URL    = os.environ.get('WAHA_BASE_URL', 'http://localhost:3000').rstrip('/')
+_API_KEY     = os.environ.get('WAHA_API_KEY', 'autoverifica-waha-key-2024')
+_SESSION     = 'default'
+_TIMEOUT     = 15
+_MAX_RETRIES = 2
 
 
-def _url(path: str) -> str:
-    return f"{BASE_URL}{path}"
+# ═══════════════════════════════════════════════════════════════════════════════
+# WahaSessionManager
+# ═══════════════════════════════════════════════════════════════════════════════
 
-
-def _log(nivel, msg, **kw):
-    """Wrapper seguro para o logger — nunca falha."""
-    try:
-        from .logger import log
-        log(nivel, msg, **kw)
-    except Exception:
-        pass
-
-
-# ─── Normalização de chatId ───────────────────────────────────────────────────
-
-def _to_chat_id(to: str) -> str:
+class WahaSessionManager:
     """
-    Converte qualquer formato de destino para chatId do WAHA.
+    Gerenciador de sessão WAHA com cache local de estado.
 
-    WAHA usa sufixos obrigatórios:
-      - Contatos: "5584999999999@c.us"
-      - Grupos:   "123456789012345678@g.us"
-
-    Aceita como entrada:
-      - "5584999999999"           → "5584999999999@c.us"
-      - "+55 84 99999-9999"       → "5584999999999@c.us"
-      - "5584999999999@c.us"     → sem mudança
-      - "5584999999999@s.whatsapp.net" → "5584999999999@c.us"
-      - "123456789@g.us"         → "123456789@g.us"
+    Benefícios vs. chamadas diretas à API:
+      - Elimina chamadas repetidas: cache TTL de 10s por padrão
+      - Zero erros 422 "already exists/started": decisões por estado
+      - Polling inteligente apenas quando necessário
+      - Thread-safe com Lock
     """
-    to = to.strip()
-    if '@g.us' in to:
-        return to  # grupo — mantém intacto
-    if '@' in to:
-        # JID qualquer de contato: extrai dígitos + adiciona @c.us
-        numero = re.sub(r'[^0-9]', '', to.split('@')[0])
-    else:
-        # Número avulso: remove tudo que não é dígito
-        numero = re.sub(r'[^0-9]', '', to)
-    return f"{numero}@c.us" if numero else ''
 
+    # Estados que indicam que a sessão está operacional (não precisa de ação)
+    _HEALTHY  = {'WORKING'}
+    _PENDING  = {'STARTING', 'SCAN_QR'}
+    _INACTIVE = {'STOPPED', 'FAILED'}
 
-# ─── Status do servidor ───────────────────────────────────────────────────────
+    def __init__(
+        self,
+        base_url: str  = _BASE_URL,
+        api_key: str   = _API_KEY,
+        session: str   = _SESSION,
+        timeout: int   = _TIMEOUT,
+        max_retries: int = _MAX_RETRIES,
+        state_ttl: int = 10,   # segundos de cache do estado
+    ):
+        self.base_url    = base_url
+        self.api_key     = api_key
+        self.session     = session
+        self.timeout     = timeout
+        self.max_retries = max_retries
+        self.state_ttl   = state_ttl
 
-def is_waha_online() -> bool:
-    """Verifica se o WAHA está acessível."""
-    try:
-        r = requests.get(_url('/api/server/status'), headers=_h(), timeout=5)
-        return r.status_code < 500
-    except Exception:
-        return False
+        # Cache de estado local
+        self._state: Optional[Dict]  = None
+        self._state_ts: float        = 0.0
+        self._lock = threading.Lock()
 
+    # ─── Infraestrutura ───────────────────────────────────────────────────────
 
-# ─── Gestão de sessão ─────────────────────────────────────────────────────────
+    def _h(self) -> Dict:
+        return {'X-Api-Key': self.api_key, 'Content-Type': 'application/json'}
 
-def get_status() -> Dict:
-    """
-    Retorna o status atual da sessão WAHA.
+    def _url(self, path: str) -> str:
+        return f"{self.base_url}{path}"
 
-    Possíveis valores de 'status':
-      STOPPED   — sessão não iniciada
-      STARTING  — iniciando (aguardar)
-      SCAN_QR   — QR disponível para escanear
-      WORKING   — conectado e funcionando
-      FAILED    — falha (re-iniciar necessário)
-    """
-    try:
-        r = requests.get(_url(f'/api/sessions/{SESSION}'), headers=_h(), timeout=TIMEOUT)
-        if r.ok:
-            data = r.json()
-            status = data.get('status', 'UNKNOWN')
-            connected = status == 'WORKING'
-            return {
-                'connected': connected,
-                'status': status,
-                'name': data.get('me', {}).get('pushName', '') if data.get('me') else '',
-                'phone': data.get('me', {}).get('id', '').split('@')[0] if data.get('me') else '',
-            }
-        if r.status_code == 404:
-            return {'connected': False, 'status': 'STOPPED'}
-        return {'connected': False, 'status': f'HTTP_{r.status_code}'}
-    except requests.exceptions.ConnectionError:
-        return {'connected': False, 'status': 'WAHA_OFFLINE'}
-    except Exception as e:
-        return {'connected': False, 'status': 'ERROR', 'error': str(e)}
-
-
-def _ensure_session_started() -> bool:
-    """
-    Garante que a sessão existe E está iniciada no WAHA.
-
-    Fluxo correto por estado:
-      Não existe (404) → POST /api/sessions           (cria + inicia)
-      STOPPED / FAILED → POST /api/sessions/{name}/start (inicia existente)
-      STARTING         → já iniciando, ok
-      SCAN_QR          → QR pronto, ok
-      WORKING          → já conectado, ok
-
-    NUNCA faz POST /api/sessions se a sessão já existe.
-    NUNCA usa PUT (apenas para reconfigurar, não para conectar).
-    """
-    st = get_status()
-    status = st.get('status', 'UNKNOWN')
-
-    _log('DEBUG', f'[WAHA] _ensure_session_started: status atual = {status}', origem='whatsapp')
-
-    # Já está em bom estado — não precisa fazer nada
-    if status in ('STARTING', 'SCAN_QR', 'WORKING'):
-        return True
-
-    # Sessão não existe → cria (POST /api/sessions)
-    if status in ('STOPPED', 'HTTP_404', 'UNKNOWN'):
-        # Tenta verificar se realmente não existe via 404
-        r_check = None
+    def _log(self, nivel: str, msg: str, **kw):
+        """Wrapper seguro para o logger centralizado — nunca propaga exceção."""
         try:
-            r_check = requests.get(_url(f'/api/sessions/{SESSION}'),
-                                   headers=_h(), timeout=TIMEOUT)
+            from web.logger import log
+            log(nivel, msg, origem='whatsapp', **kw)
         except Exception:
             pass
 
-        session_exists = r_check is not None and r_check.status_code != 404
+    # ─── Cache de estado ──────────────────────────────────────────────────────
 
-        if not session_exists:
-            # Criar sessão nova
-            _log('INFO', 'Criando sessão WAHA (não existia).', origem='whatsapp')
-            try:
-                r = requests.post(_url('/api/sessions'), headers=_h(), json={
-                    'name': SESSION,
-                    'config': {
-                        'debug': False,
-                        'noweb': {'store': {'enabled': True, 'fullSync': False}},
-                    },
-                }, timeout=TIMEOUT)
-                if r.ok:
-                    return True
-                print(f'[WAHA] POST /api/sessions → HTTP {r.status_code}: {r.text[:200]}')
-            except Exception as e:
-                print(f'[WAHA] Erro ao criar sessão: {e}')
-                return False
+    def _is_cache_valid(self) -> bool:
+        return (
+            self._state is not None
+            and (time.time() - self._state_ts) < self.state_ttl
+        )
 
-        # Sessão existe mas está STOPPED/FAILED → usa start
-        _log('INFO', f'Iniciando sessão WAHA existente (status: {status}).', origem='whatsapp')
+    def _invalidate_cache(self):
+        with self._lock:
+            self._state    = None
+            self._state_ts = 0.0
+
+    def _cache_state(self, state: Dict):
+        with self._lock:
+            self._state    = state
+            self._state_ts = time.time()
+
+    # ─── API: Status da sessão ────────────────────────────────────────────────
+
+    def get_status(self, force: bool = False) -> Dict:
+        """
+        Retorna o status atual da sessão.
+
+        Usa cache local para evitar polling excessivo.
+        Passe force=True para forçar leitura da API.
+
+        Returns:
+            {
+                'connected': bool,
+                'status': 'WORKING' | 'STOPPED' | 'STARTING' | 'SCAN_QR' | 'FAILED' | ...,
+                'exists': bool,
+                'name': str,   # nome exibido no WhatsApp
+                'phone': str,  # número conectado
+            }
+        """
+        if not force and self._is_cache_valid():
+            return self._state.copy()
+
+        result = self._fetch_status()
+        self._cache_state(result)
+        return result.copy()
+
+    def _fetch_status(self) -> Dict:
+        """Consulta real à API — sempre usa a rede."""
         try:
-            r = requests.post(_url(f'/api/sessions/{SESSION}/start'),
-                              headers=_h(), timeout=TIMEOUT)
+            r = requests.get(
+                self._url(f'/api/sessions/{self.session}'),
+                headers=self._h(),
+                timeout=self.timeout,
+            )
+            if r.ok:
+                data   = r.json()
+                status = data.get('status', 'UNKNOWN')
+                me     = data.get('me') or {}
+                return {
+                    'connected': status == 'WORKING',
+                    'status':    status,
+                    'exists':    True,
+                    'name':      me.get('pushName', ''),
+                    'phone':     me.get('id', '').split('@')[0],
+                }
+            if r.status_code == 404:
+                return {'connected': False, 'status': 'NOT_EXISTS', 'exists': False}
+            return {'connected': False, 'status': f'HTTP_{r.status_code}', 'exists': False}
+
+        except requests.exceptions.ConnectionError:
+            return {'connected': False, 'status': 'WAHA_OFFLINE', 'exists': False}
+        except Exception as e:
+            return {'connected': False, 'status': 'ERROR', 'exists': False, 'error': str(e)}
+
+    def is_online(self) -> bool:
+        """Verifica se o servidor WAHA está acessível."""
+        try:
+            r = requests.get(self._url('/api/server/status'), headers=self._h(), timeout=5)
+            return r.status_code < 500
+        except Exception:
+            return False
+
+    # ─── API: Ciclo de vida da sessão ─────────────────────────────────────────
+
+    def _create_session(self) -> bool:
+        """POST /api/sessions — somente quando a sessão NÃO existe."""
+        self._log('INFO', f'Criando sessão WAHA "{self.session}".')
+        try:
+            r = requests.post(self._url('/api/sessions'), headers=self._h(), json={
+                'name': self.session,
+                'config': {
+                    'debug': False,
+                    'noweb': {'store': {'enabled': True, 'fullSync': False}},
+                },
+            }, timeout=self.timeout)
+            ok = r.ok
+            if not ok:
+                self._log('ERROR',
+                          f'Falha ao criar sessão: HTTP {r.status_code}',
+                          detalhe=r.text[:300])
+            return ok
+        except Exception as e:
+            self._log('ERROR', f'Exceção ao criar sessão: {e}')
+            return False
+
+    def _start_session(self) -> bool:
+        """POST /api/sessions/{name}/start — quando sessão existe mas está STOPPED."""
+        self._log('INFO', f'Iniciando sessão WAHA "{self.session}" (start).')
+        try:
+            r = requests.post(
+                self._url(f'/api/sessions/{self.session}/start'),
+                headers=self._h(),
+                timeout=self.timeout,
+            )
             if r.ok:
                 return True
-            body = r.text[:200]
-            # "already started" = 422 — é sucesso
+            body = r.text[:300]
+            # 422 "already started" = já está ativa = sucesso
             if r.status_code == 422 and 'already' in body.lower():
+                self._log('DEBUG', 'Sessão já estava iniciada (422 ignorado como sucesso).')
                 return True
-            print(f'[WAHA] POST /api/sessions/{SESSION}/start → HTTP {r.status_code}: {body}')
+            self._log('ERROR', f'Falha ao iniciar sessão: HTTP {r.status_code}', detalhe=body)
             return False
         except Exception as e:
-            print(f'[WAHA] Erro ao iniciar sessão: {e}')
+            self._log('ERROR', f'Exceção ao iniciar sessão: {e}')
             return False
 
-    if status == 'FAILED':
-        # FAILED → tenta stop + start para resetar
-        _log('WARNING', 'Sessão WAHA em FAILED, tentando resetar.', origem='whatsapp')
+    def _stop_session(self) -> bool:
+        """POST /api/sessions/{name}/stop — para a sessão sem deletar."""
         try:
-            requests.post(_url(f'/api/sessions/{SESSION}/stop'),
-                          headers=_h(), timeout=TIMEOUT)
-            time.sleep(1)
-            r = requests.post(_url(f'/api/sessions/{SESSION}/start'),
-                              headers=_h(), timeout=TIMEOUT)
+            r = requests.post(
+                self._url(f'/api/sessions/{self.session}/stop'),
+                headers=self._h(),
+                timeout=self.timeout,
+            )
+            self._log('INFO', f'Sessão parada (stop). HTTP {r.status_code}.')
             return r.ok
         except Exception as e:
-            print(f'[WAHA] Erro ao resetar sessão FAILED: {e}')
+            self._log('WARNING', f'Erro ao parar sessão: {e}')
             return False
 
-    return False
+    # ─── Lógica principal: garantir sessão ativa ─────────────────────────────
 
+    def ensure_ready(self) -> Dict:
+        """
+        Garante que a sessão está no caminho correto para WORKING.
 
+        Fluxo state-driven (sem chamadas desnecessárias):
 
-def ensure_session_and_get_qr() -> Dict:
-    """
-    Garante que a sessão existe e retorna o QR Code para scan.
+          NOT_EXISTS  → _create_session()  → STARTING
+          STOPPED     → _start_session()   → STARTING
+          FAILED      → _stop_session()
+                        + _start_session() → STARTING
+          STARTING    → aguarda SCAN_QR   (sem nova ação)
+          SCAN_QR     → busca QR          (sem nova ação)
+          WORKING     → retorna already_connected imediatamente
 
-    Fluxo WAHA:
-      WORKING              → já conectado, retorna already_connected
-      STARTING / SCAN_QR   → sessão iniciando, aguarda e retorna QR
-      STOPPED / FAILED     → inicia sessão, aguarda SCAN_QR
-      Não existe (HTTP_404) → cria sessão e aguarda SCAN_QR
-    """
-    st = get_status()
+        Returns:
+            {'already_connected': True}              — já conectado
+            {'base64': '...', 'mimetype': '...'}     — QR pronto
+            {'starting': True, 'status': '...'}      — iniciando, continuar polling
+            {'error': '...'}                         — erro irrecuperável
+        """
+        self._invalidate_cache()   # força leitura fresca ao iniciar fluxo
+        st = self.get_status(force=True)
+        status = st.get('status')
 
-    if st['status'] == 'WAHA_OFFLINE':
-        return {'error': 'WAHA está offline ou inacessível. Verifique o container.'}
+        self._log('DEBUG', f'ensure_ready: status={status}')
 
-    if st.get('connected'):  # WORKING
-        return {'already_connected': True}
+        # ── Servidor inacessível ───────────────────────────────────────────
+        if status == 'WAHA_OFFLINE':
+            return {'error': 'WAHA offline. Verifique o container no Dokploy.'}
 
-    # Se não está rodando, garante que está iniciada
-    if st['status'] not in ('STARTING', 'SCAN_QR'):
-        _log('INFO', f'Iniciando sessão WAHA (status: {st["status"]}).', origem='whatsapp')
-        ok = _ensure_session_started()
-        if not ok:
-            return {'error': 'Não foi possível iniciar a sessão WAHA. Verifique os logs do container.'}
+        # ── Já conectado ───────────────────────────────────────────────────
+        if status == 'WORKING':
+            return {'already_connected': True}
 
-    # Aguarda até SCAN_QR (máx 12s) com polling curto
-    for attempt in range(6):
-        time.sleep(2)
-        st = get_status()
+        # ── Sessão inexistente: criar ──────────────────────────────────────
+        if status == 'NOT_EXISTS':
+            ok = self._create_session()
+            if not ok:
+                return {'error': 'Falha ao criar sessão WAHA.'}
+            self._invalidate_cache()
+
+        # ── Sessão parada: iniciar ─────────────────────────────────────────
+        elif status == 'STOPPED':
+            ok = self._start_session()
+            if not ok:
+                return {'error': 'Falha ao iniciar sessão WAHA.'}
+            self._invalidate_cache()
+
+        # ── Sessão com falha: resetar ──────────────────────────────────────
+        elif status == 'FAILED':
+            self._log('WARNING', 'Sessão em FAILED — executando reset (stop + start).')
+            self._stop_session()
+            time.sleep(1)
+            ok = self._start_session()
+            if not ok:
+                return {'error': 'Falha ao resetar sessão WAHA em estado FAILED.'}
+            self._invalidate_cache()
+
+        # ── STARTING/SCAN_QR: já está no caminho certo, só busca QR ──────
+        # (nenhuma ação de start necessária)
+
+        # ── Aguarda até SCAN_QR com polling controlado (máx 20s) ──────────
+        for attempt in range(10):
+            time.sleep(2)
+            st = self.get_status(force=True)
+            status = st.get('status')
+
+            if status == 'WORKING':
+                return {'already_connected': True}
+            if status == 'SCAN_QR':
+                break
+            if status in ('FAILED', 'WAHA_OFFLINE'):
+                return {'error': f'Sessão entrou em estado {status} durante a inicialização.'}
+            # STARTING → continua aguardando
+
+        # ── Tenta obter QR ────────────────────────────────────────────────
+        return self._fetch_qr()
+
+    # ─── QR Code ──────────────────────────────────────────────────────────────
+
+    def _fetch_qr(self) -> Dict:
+        """
+        Busca o QR code da sessão.
+
+        Retornos:
+          {'base64': '...', 'mimetype': '...'}  → QR pronto
+          {'starting': True, 'status': '...'}   → ainda iniciando, polling continua
+          {'already_connected': True}            → conectou enquanto aguardava
+          {'error': '...'}                       → erro real
+        """
+        # Não solicita QR se já conectado
+        st = self.get_status()
         if st.get('connected'):
             return {'already_connected': True}
-        if st['status'] == 'SCAN_QR':
-            break
-        if st['status'] == 'FAILED':
-            return {'error': 'Sessão WAHA entrou em estado FAILED. Tente desconectar e reconectar.'}
 
-    # Busca o QR — pode ainda estar STARTING (retorna 'starting' para polling)
-    return _fetch_qr()
-
-
-
-def _fetch_qr() -> Dict:
-    """
-    Busca o QR code atual da sessão.
-
-    Retornos possíveis:
-      {'base64': '...', 'mimetype': 'image/png'}  → QR pronto para exibir
-      {'starting': True}                           → sessão iniciando, polling continua
-      {'error': '...'}                             → erro real
-    """
-    try:
-        r = requests.get(_url(f'/api/sessions/{SESSION}/qr'),
-                         headers=_h(), timeout=TIMEOUT)
-        if r.ok:
-            data = r.json()
-            # WAHA retorna {mimetype: "image/png", data: "base64string"}
-            if data.get('data'):
-                return {'base64': data['data'], 'mimetype': data.get('mimetype', 'image/png')}
-        if r.status_code == 404:
-            # 404 = sessão ainda não chegou em SCAN_QR (está STARTING)
-            # Não é erro — o frontend deve continuar fazendo polling
-            st = get_status()
-            if st.get('connected'):
-                return {'already_connected': True}
-            return {'starting': True, 'status': st.get('status', 'STARTING')}
-        return {'error': f'Erro ao buscar QR: HTTP {r.status_code} — {r.text[:200]}'}
-    except Exception as e:
-        return {'error': f'Erro ao buscar QR: {e}'}
-
-
-def get_qr() -> Dict:
-    """Polling: retorna QR atual ou sinaliza se conectado."""
-    st = get_status()
-    if st.get('connected'):
-        return {'already_connected': True}
-    if st['status'] == 'WAHA_OFFLINE':
-        return {'error': 'WAHA offline'}
-    return _fetch_qr()
-
-
-def disconnect() -> bool:
-    """
-    Para a sessão WAHA (stop), mas NÃO deleta.
-
-    Manter a sessão no estado STOPPED permite reconectar via
-    POST /api/sessions/{name}/start sem precisar recriar.
-    Deletar causaria o erro 422 "already exists" na próxima criação.
-    """
-    try:
-        r = requests.post(_url(f'/api/sessions/{SESSION}/stop'),
-                          headers=_h(), timeout=TIMEOUT)
-        _log('INFO', f'Sessão WAHA parada (stop). HTTP {r.status_code}.', origem='whatsapp')
-    except Exception as e:
-        _log('WARNING', f'Erro ao parar sessão WAHA: {e}', origem='whatsapp')
-    return True
-
-
-# ─── Contatos e Grupos ────────────────────────────────────────────────────────
-
-def get_chats(limit: int = 200) -> List[Dict]:
-    """Retorna grupos e contatos da sessão atual."""
-    result = []
-
-    # Grupos
-    try:
-        r = requests.get(_url(f'/api/{SESSION}/groups'),
-                         headers=_h(), timeout=TIMEOUT)
-        if r.ok:
-            for g in (r.json() or []):
-                result.append({
-                    'id':   g.get('id', ''),
-                    'name': g.get('subject') or g.get('name') or g.get('id', ''),
-                    'type': 'grupo',
-                    'pic':  '',
-                })
-    except Exception:
-        pass
-
-    # Contatos recentes
-    try:
-        r = requests.get(_url(f'/api/contacts/all?session={SESSION}'),
-                         headers=_h(), timeout=TIMEOUT)
-        if r.ok:
-            for c in (r.json() or [])[:100]:
-                jid = c.get('id', '')
-                if '@g.us' in jid:
-                    continue
-                name = c.get('pushName') or c.get('name') or jid.split('@')[0]
-                result.append({'id': jid, 'name': name, 'type': 'contato', 'pic': ''})
-    except Exception:
-        pass
-
-    return result[:limit]
-
-
-# ─── Envio de Mensagem ────────────────────────────────────────────────────────
-
-def send_text(to: str, text: str) -> Dict:
-    """
-    Envia mensagem de texto via WAHA com retry automático.
-
-    Camadas de proteção:
-      1. Verifica status da sessão (WORKING?)
-      2. Normaliza chatId para formato WAHA
-      3. Envia com até MAX_RETRIES tentativas (backoff exponencial)
-      4. Loga todos os eventos no sistema de logs centralizado
-
-    Args:
-        to:   Número de telefone, JID @c.us ou @g.us
-        text: Texto da mensagem
-
-    Returns:
-        {'ok': True, 'data': ...}          em caso de sucesso
-        {'ok': False, 'error': '...', 'needs_reconnect': bool}  em caso de falha
-    """
-    # ── Camada 1: Verificar sessão ────────────────────────────────────────────
-    status = get_status()
-    if not status.get('connected'):
-        msg = (f'Sessão WAHA não está ativa (status: {status.get("status")}). '
-               'Acesse a aba WhatsApp e escaneie o QR Code.')
-        _log('WARNING', msg, origem='whatsapp')
-        return {'ok': False, 'error': msg, 'needs_reconnect': True}
-
-    # ── Camada 2: Normalizar chatId ───────────────────────────────────────────
-    chat_id = _to_chat_id(to)
-    if not chat_id:
-        return {'ok': False, 'error': f'Número/JID inválido: {to!r}'}
-
-    payload = {'chatId': chat_id, 'text': text, 'session': SESSION}
-    preview = text[:60] + ('...' if len(text) > 60 else '')
-    _log('DEBUG', f'Tentando enviar → {chat_id} | "{preview}"', origem='whatsapp')
-
-    # ── Camada 3: Envio com retry ─────────────────────────────────────────────
-    last_result = None
-    for attempt in range(MAX_RETRIES + 1):
-        if attempt > 0:
-            wait = 2 ** (attempt - 1)  # 1s, 2s, 4s...
-            _log('WARNING',
-                 f'Retry {attempt}/{MAX_RETRIES} para {chat_id} (aguardando {wait}s).',
-                 origem='whatsapp')
-            time.sleep(wait)
-
-        last_result = _do_send_text(chat_id, payload, attempt)
-
-        if last_result['ok']:
-            _log('INFO',
-                 f'Mensagem enviada com sucesso → {chat_id}',
-                 origem='whatsapp')
-            return last_result
-
-        if not last_result.get('retryable', False):
-            break  # erro definitivo — não adianta tentar de novo
-
-    # Todas as tentativas falharam
-    _log('ERROR',
-         f'Falha ao enviar mensagem para {chat_id} após {MAX_RETRIES + 1} tentativa(s): '
-         f'{last_result.get("error")}',
-         origem='whatsapp',
-         detalhe=last_result.get('raw_response', ''))
-    return last_result
-
-
-def _do_send_text(chat_id: str, payload: Dict, attempt: int = 0) -> Dict:
-    """Executa uma tentativa de envio HTTP para o WAHA."""
-    try:
-        r = requests.post(
-            _url('/api/sendText'),
-            headers=_h(),
-            json=payload,
-            timeout=30,
-        )
-        print(f'[WAHA] sendText → HTTP {r.status_code} (tentativa {attempt + 1}) '
-              f'| chatId: {chat_id} | {r.text[:200]}')
-
-        if r.ok:
-            return {'ok': True, 'data': r.json()}
-
-        # ── Erros tratados ─────────────────────────────────────────────────
         try:
-            err_body = r.json()
+            r = requests.get(
+                self._url(f'/api/sessions/{self.session}/qr'),
+                headers=self._h(),
+                timeout=self.timeout,
+            )
+            if r.ok:
+                data = r.json()
+                if data.get('data'):
+                    return {
+                        'base64':   data['data'],
+                        'mimetype': data.get('mimetype', 'image/png'),
+                    }
+            if r.status_code == 404:
+                # Sessão ainda em STARTING — não é erro
+                st = self.get_status(force=True)
+                if st.get('connected'):
+                    return {'already_connected': True}
+                return {'starting': True, 'status': st.get('status', 'STARTING')}
+
+            return {'error': f'Erro ao buscar QR: HTTP {r.status_code} — {r.text[:200]}'}
+
+        except Exception as e:
+            return {'error': f'Erro ao buscar QR: {e}'}
+
+    def get_qr_poll(self) -> Dict:
+        """
+        Endpoint para polling de QR pelo frontend (chamado a cada 5s).
+
+        Não inicia sessão — apenas retorna estado atual.
+        """
+        st = self.get_status(force=True)
+        status = st.get('status')
+
+        if status == 'WORKING':
+            return {'connected': True}
+        if status == 'WAHA_OFFLINE':
+            return {'connected': False, 'error': 'WAHA offline'}
+        return self._fetch_qr()
+
+    # ─── Desconexão ───────────────────────────────────────────────────────────
+
+    def disconnect(self) -> bool:
+        """
+        Para a sessão (STOP), mas NÃO deleta.
+
+        Manter a sessão em STOPPED permite reconectar via /start
+        sem precisar recriar — evita o 422 "already exists".
+        """
+        ok = self._stop_session()
+        self._invalidate_cache()
+        return ok
+
+    # ─── Contatos e Grupos ────────────────────────────────────────────────────
+
+    def get_chats(self, limit: int = 200) -> List[Dict]:
+        """Retorna grupos e contatos da sessão ativa."""
+        result: List[Dict] = []
+
+        # Grupos
+        try:
+            r = requests.get(
+                self._url(f'/api/{self.session}/groups'),
+                headers=self._h(), timeout=self.timeout,
+            )
+            if r.ok:
+                for g in (r.json() or []):
+                    result.append({
+                        'id':   g.get('id', ''),
+                        'name': g.get('subject') or g.get('name') or g.get('id', ''),
+                        'type': 'grupo',
+                        'pic':  '',
+                    })
         except Exception:
-            err_body = r.text[:300]
+            pass
 
-        err_str = str(err_body).lower()
+        # Contatos recentes
+        try:
+            r = requests.get(
+                self._url(f'/api/contacts/all?session={self.session}'),
+                headers=self._h(), timeout=self.timeout,
+            )
+            if r.ok:
+                for c in (r.json() or [])[:100]:
+                    jid = c.get('id', '')
+                    if '@g.us' in jid:
+                        continue
+                    name = c.get('pushName') or c.get('name') or jid.split('@')[0]
+                    result.append({'id': jid, 'name': name, 'type': 'contato', 'pic': ''})
+        except Exception:
+            pass
 
-        # Sessão não está pronta → needs_reconnect (não é retryable)
-        if any(k in err_str for k in ('not authenticated', 'session not found',
-                                       'not connected', 'no session')):
+        return result[:limit]
+
+    # ─── Envio de mensagem ────────────────────────────────────────────────────
+
+    @staticmethod
+    def _normalize_chat_id(to: str) -> str:
+        """
+        Normaliza destino para chatId WAHA.
+
+        Grupos (@g.us): mantém intacto.
+        Contatos: extrai dígitos + adiciona @c.us.
+        """
+        to = to.strip()
+        if '@g.us' in to:
+            return to
+        if '@' in to:
+            digits = re.sub(r'[^0-9]', '', to.split('@')[0])
+        else:
+            digits = re.sub(r'[^0-9]', '', to)
+        return f"{digits}@c.us" if digits else ''
+
+    def send_text(self, to: str, text: str) -> Dict:
+        """
+        Envia mensagem de texto com validação de sessão e retry.
+
+        Camadas:
+          1. Verifica se sessão está WORKING (sem chamada extra se cache válido)
+          2. Normaliza chatId
+          3. Envia com backoff exponencial (até max_retries tentativas extras)
+          4. Loga todos os eventos
+
+        Returns:
+          {'ok': True, 'data': {...}}
+          {'ok': False, 'error': '...', 'needs_reconnect': bool}
+        """
+        # Camada 1: sessão ativa?
+        st = self.get_status()
+        if not st.get('connected'):
+            msg = (f'Sessão WAHA não está ativa (status: {st.get("status")}). '
+                   'Acesse a aba WhatsApp e escaneie o QR Code.')
+            self._log('WARNING', msg)
+            return {'ok': False, 'error': msg, 'needs_reconnect': True}
+
+        # Camada 2: normalizar chatId
+        chat_id = self._normalize_chat_id(to)
+        if not chat_id:
+            return {'ok': False, 'error': f'Número/JID inválido: {to!r}'}
+
+        payload = {'chatId': chat_id, 'text': text, 'session': self.session}
+        preview = text[:60] + ('...' if len(text) > 60 else '')
+        self._log('DEBUG', f'Enviando → {chat_id} | "{preview}"')
+
+        # Camada 3: envio com retry
+        last_result: Dict = {}
+        for attempt in range(self.max_retries + 1):
+            if attempt > 0:
+                wait = 2 ** (attempt - 1)   # 1s, 2s, 4s...
+                self._log('WARNING',
+                          f'Retry {attempt}/{self.max_retries} para {chat_id} ({wait}s).')
+                time.sleep(wait)
+
+            last_result = self._do_send(chat_id, payload)
+
+            if last_result['ok']:
+                # Invalida cache de status para refletir estado real após envio
+                self._invalidate_cache()
+                self._log('INFO', f'Mensagem enviada → {chat_id}')
+                return last_result
+
+            if not last_result.get('retryable', False):
+                break   # erro definitivo
+
+        self._log('ERROR',
+                  f'Falha definitiva ao enviar para {chat_id}: {last_result.get("error")}',
+                  detalhe=last_result.get('raw_response', ''))
+        return last_result
+
+    def _do_send(self, chat_id: str, payload: Dict) -> Dict:
+        """Executa uma tentativa de HTTP POST para /api/sendText."""
+        try:
+            r = requests.post(
+                self._url('/api/sendText'),
+                headers=self._h(),
+                json=payload,
+                timeout=30,
+            )
+            if r.ok:
+                return {'ok': True, 'data': r.json()}
+
+            try:
+                err_body = r.json()
+            except Exception:
+                err_body = r.text[:300]
+
+            err_str = str(err_body).lower()
+
+            # Sessão não autenticada → reconectar
+            if any(k in err_str for k in ('not authenticated', 'session not found',
+                                           'not connected', 'no session')):
+                self._invalidate_cache()
+                return {
+                    'ok': False,
+                    'error': 'Sessão WhatsApp não autenticada. Reconecte na aba WhatsApp.',
+                    'needs_reconnect': True,
+                    'retryable': False,
+                    'raw_response': str(err_body),
+                }
+
+            # Rate limit / timeout → retryable
+            if r.status_code in (429, 503) or 'timeout' in err_str:
+                return {
+                    'ok': False,
+                    'error': f'WAHA sobrecarregado (HTTP {r.status_code}). Tentando novamente...',
+                    'retryable': True,
+                    'raw_response': str(err_body),
+                }
+
             return {
                 'ok': False,
-                'error': 'Sessão WhatsApp não autenticada. Reconecte na aba WhatsApp.',
-                'needs_reconnect': True,
+                'error': f'HTTP {r.status_code}: {err_body}',
                 'retryable': False,
                 'raw_response': str(err_body),
             }
 
-        # Erro de rate limit ou timeout → retryable
-        if r.status_code in (429, 503) or 'timeout' in err_str:
-            return {
-                'ok': False,
-                'error': f'WAHA ocupado (HTTP {r.status_code}). Tentando novamente...',
-                'retryable': True,
-                'raw_response': str(err_body),
-            }
+        except requests.exceptions.Timeout:
+            return {'ok': False, 'error': 'Timeout ao chamar WAHA.', 'retryable': True}
+        except requests.exceptions.ConnectionError:
+            return {'ok': False, 'error': 'WAHA inacessível.', 'retryable': False}
+        except Exception as e:
+            return {'ok': False, 'error': str(e), 'retryable': False}
 
-        # Outros erros HTTP (400, 422 etc.) → não retryable
-        return {
-            'ok': False,
-            'error': f'HTTP {r.status_code}: {err_body}',
-            'retryable': False,
-            'raw_response': str(err_body),
-        }
 
-    except requests.exceptions.Timeout:
-        return {'ok': False, 'error': 'Timeout na requisição ao WAHA.', 'retryable': True}
-    except requests.exceptions.ConnectionError:
-        return {'ok': False, 'error': 'WAHA offline ou inacessível.', 'retryable': False}
-    except Exception as e:
-        return {'ok': False, 'error': str(e), 'retryable': False}
+# ═══════════════════════════════════════════════════════════════════════════════
+# Singleton — instância única compartilhada por toda a aplicação Flask
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_manager: Optional[WahaSessionManager] = None
+
+
+def _get_manager() -> WahaSessionManager:
+    """Retorna o singleton WahaSessionManager (lazy init)."""
+    global _manager
+    if _manager is None:
+        _manager = WahaSessionManager()
+    return _manager
+
+
+# ─── API pública — mantém compatibilidade com routes.py existente ─────────────
+
+def is_waha_online() -> bool:
+    return _get_manager().is_online()
+
+def get_status() -> Dict:
+    return _get_manager().get_status()
+
+def ensure_session_and_get_qr() -> Dict:
+    return _get_manager().ensure_ready()
+
+def get_qr() -> Dict:
+    return _get_manager().get_qr_poll()
+
+def disconnect() -> bool:
+    return _get_manager().disconnect()
+
+def get_chats(limit: int = 200) -> List[Dict]:
+    return _get_manager().get_chats(limit)
+
+def send_text(to: str, text: str) -> Dict:
+    return _get_manager().send_text(to, text)
