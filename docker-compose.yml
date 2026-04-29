@@ -12,10 +12,10 @@ services:
       DATABASE_URL: "sqlite:////app/instance/verificacoes.db"
       CHROME_BIN: "/usr/bin/chromium"
       CHROMEDRIVER_BIN: "/usr/bin/chromedriver"
-      EVOLUTION_BASE_URL: "http://evolution-api:8080"
-      EVOLUTION_API_KEY: "autoverifica-evo-key-2024"
+      WAHA_BASE_URL: "http://waha:3000"
+      WAHA_API_KEY: "autoverifica-waha-key-2024"
     depends_on:
-      - evolution-api
+      - waha
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/auth/login')"]
       interval: 30s
@@ -23,74 +23,30 @@ services:
       retries: 3
       start_period: 30s
 
-  # ── Evolution API — WhatsApp Gateway ───────────────────────────────────
-  evolution-api:
-    image: atendai/evolution-api:v2.2.3
-    container_name: evolution-api
+  # ── WAHA — WhatsApp HTTP API ──────────────────────────────────────────────
+  # Engine NOWEB: sem Chrome, sem banco externo, sessões persistidas em disco.
+  # Substitui: evolution-api + evolution-postgres + evolution-redis (3 containers → 1)
+  waha:
+    image: devlikeapro/waha
+    container_name: waha
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "3000:3000"
     volumes:
-      - evolution_data:/evolution/instances
-    depends_on:
-      - evolution-postgres
-      - evolution-redis
+      - waha_sessions:/app/.sessions
     environment:
-      SERVER_URL: "http://evolution-api:8080"
-      AUTHENTICATION_API_KEY: "autoverifica-evo-key-2024"
-      # ── Banco: PostgreSQL (Histórico desativado para evitar Timeout 408/Erro 515) ──
-      DATABASE_PROVIDER: "postgresql"
-      DATABASE_CONNECTION_URI: "postgresql://evolution:evolution123@evolution-postgres:5432/evolution"
-      DATABASE_SAVE_DATA_INSTANCE: "true"
-      DATABASE_SAVE_DATA_OLD_MESSAGE: "false"
-      DATABASE_SAVE_DATA_NEW_MESSAGE: "true"
-      DATABASE_SAVE_DATA_CONTACTS: "false"
-      DATABASE_SAVE_DATA_CHATS: "false"
-      DATABASE_SAVE_DATA_HISTORIC: "false"
-      DATABASE_SAVE_DATA_LABELS: "false"
-      # ── Cache: Local (Mais rápido que Redis para arranque pesado do Baileys) ──
-      CACHE_REDIS_ENABLED: "false"
-      CACHE_LOCAL_ENABLED: "true"
-      # ── Configurações gerais ──
-      CONFIG_SESSION_PHONE_VERSION: "2.3000.1033773198"
-      QRCODE_LIMIT: "30"
-      QRCODE_COLOR: "#128C7E"
-      LOG_LEVEL: "INFO"
-      LOG_COLOR: "false"
-      DEL_INSTANCE: "false"
-
-  # ── PostgreSQL — Banco da Evolution API ───────────────────────────────
-  evolution-postgres:
-    image: postgres:16-alpine
-    container_name: evolution-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: "evolution"
-      POSTGRES_PASSWORD: "evolution123"
-      POSTGRES_DB: "evolution"
-    volumes:
-      - evolution_postgres:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U evolution"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # ── Redis — Cache para sessões do WhatsApp ─────────────────────────────
-  evolution-redis:
-    image: redis:7-alpine
-    container_name: evolution-redis
-    restart: unless-stopped
-    command: redis-server --save 60 1 --loglevel warning --appendonly yes
-    volumes:
-      - evolution_redis:/data
+      # Chave de autenticação usada no header X-Api-Key
+      WAHA_API_KEY: "autoverifica-waha-key-2024"
+      # Engine NOWEB: não usa Chrome, muito mais estável e leve (~100MB RAM)
+      WHATSAPP_DEFAULT_ENGINE: NOWEB
+      # Não exibir QR no terminal (gerenciamos via API)
+      WAHA_PRINT_QR: "false"
+      LOG_LEVEL: "info"
+      # Desabilita a autenticação do dashboard (opcional — só acessível internamente)
+      WAHA_DASHBOARD_ENABLED: "true"
 
 volumes:
   autoverifica_data:
     driver: local
-  evolution_data:
-    driver: local
-  evolution_postgres:
-    driver: local
-  evolution_redis:
+  waha_sessions:
     driver: local

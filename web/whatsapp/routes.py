@@ -57,16 +57,16 @@ def index():
         db.create_all()
         cfg = WhatsappConfig.get_config()
 
-    # Evolution API pode estar offline -- nunca deixar crashar a pagina
+    # WAHA pode estar offline — nunca deixar crashar a página
     try:
         wa_status = wa_client.get_status()
     except Exception:
-        wa_status = {'connected': False, 'status': 'evolution_offline'}
+        wa_status = {'connected': False, 'status': 'WAHA_OFFLINE'}
 
     try:
-        evo_ok = wa_client.is_evolution_online()
+        waha_ok = wa_client.is_waha_online()
     except Exception:
-        evo_ok = False
+        waha_ok = False
 
     resumo = _gerar_resumo()
     return render_template('whatsapp/index.html',
@@ -74,7 +74,7 @@ def index():
         cfg=cfg,
         wa_status=wa_status,
         resumo=resumo,
-        evo_online=evo_ok,
+        waha_online=waha_ok,
     )
 
 
@@ -94,7 +94,7 @@ def api_status():
 def api_conectar():
     from . import wa_client
     try:
-        result = wa_client.ensure_instance_and_get_qr()
+        result = wa_client.ensure_session_and_get_qr()
         if result.get('error'):
             return jsonify({'status': 'erro', 'mensagem': result['error']}), 500
         if result.get('already_connected'):
