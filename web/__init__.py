@@ -62,16 +62,19 @@ def create_app():
     # Handler global: persiste exceções não tratadas no painel de logs
     @app.errorhandler(Exception)
     def handle_unhandled_exception(e):
-        import traceback
+        from werkzeug.exceptions import HTTPException
         from flask import request as req
-        # Não loga erros 4xx (são esperados)
-        code = getattr(e, 'code', 500)
-        if isinstance(code, int) and code < 500:
-            raise e
+
+        # Erros HTTP (4xx, 5xx do Werkzeug) — deixa o Flask renderizar normalmente
+        # SEM re-raise, pois isso causaria traceback desnecessário nos logs
+        if isinstance(e, HTTPException):
+            return e
+
+        # Apenas exceções Python não tratadas (bugs reais) chegam aqui
         try:
             from .logger import log_error
             log_error(
-                f'{req.method} {req.path} → {type(e).__name__}: {e}',
+                f'{req.method} {req.path} -> {type(e).__name__}: {e}',
                 exc=e, origem='backend'
             )
         except Exception:
