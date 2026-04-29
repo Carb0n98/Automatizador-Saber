@@ -99,6 +99,9 @@ def api_conectar():
             return jsonify({'status': 'erro', 'mensagem': result['error']}), 500
         if result.get('already_connected'):
             return jsonify({'status': 'conectado'})
+        if result.get('starting'):
+            # Sessão ainda iniciando — frontend vai fazer polling de /api/qr
+            return jsonify({'status': 'iniciando'})
         return jsonify({'status': 'ok', 'qr': result})
     except Exception as e:
         return jsonify({'status': 'erro', 'mensagem': str(e)}), 500
@@ -107,13 +110,18 @@ def api_conectar():
 @whatsapp_bp.route('/api/qr')
 @login_required
 def api_qr():
-    """Polling do QR code — chamado a cada 20s pela UI."""
+    """Polling do QR code — chamado a cada 5s pela UI enquanto aguarda scan."""
     from . import wa_client
     try:
         status = wa_client.get_status()
         if status.get('connected'):
             return jsonify({'connected': True})
         qr = wa_client.get_qr()
+        if qr.get('already_connected'):
+            return jsonify({'connected': True})
+        if qr.get('starting'):
+            # Ainda iniciando — não é erro, continua polling
+            return jsonify({'connected': False, 'starting': True, 'waha_status': qr.get('status')})
         if qr.get('error'):
             return jsonify({'connected': False, 'error': qr['error']})
         return jsonify({'connected': False, 'qr': qr})

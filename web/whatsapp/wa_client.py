@@ -119,61 +119,90 @@ def get_status() -> Dict:
         return {'connected': False, 'status': 'ERROR', 'error': str(e)}
 
 
-def _create_session() -> bool:
-    """Cria a sessão default no WAHA se não existir ainda."""
+def _ensure_session_started() -> bool:
+    """
+    Garante que a sessão existe E está iniciada no WAHA.
+
+    Ciclo de vida WAHA:
+      Inexistente → POST /api/sessions (cria e inicia)
+      STOPPED     → POST /api/sessions/{name}/start
+      Já ativa    → 422 "already started" (tratamos como sucesso)
+    """
     try:
+        # Tenta criar (também inicia automaticamente)
         r = requests.post(_url('/api/sessions'), headers=_h(), json={
             'name': SESSION,
             'config': {
                 'debug': False,
-                # Iniciar automaticamente ao criar
                 'noweb': {'store': {'enabled': True, 'fullSync': False}},
             },
         }, timeout=TIMEOUT)
-        return r.ok or r.status_code == 409  # 409 = já existe, ok
-    except Exception:
-        return False
+        # 200/201 = criada e iniciando
+        # 409 = já existe (não iniciada) → tenta start
+        # 422 = já existe e já está iniciada → OK
+        if r.ok or r.status_code == 422:
+            return True
+        if r.status_code == 409:
+            # Sessão existe mas parada — dá start
+            r2 = requests.post(_url(f'/api/sessions/{SESSION}/start'),
+                               headers=_h(), timeout=TIMEOUT)
+            return r2.ok or r2.status_code == 422
+    except Exception as e:
+        print(f'[WAHA] Erro ao criar/iniciar sessão: {e}')
+    return False
+
 
 
 def ensure_session_and_get_qr() -> Dict:
     """
     Garante que a sessão existe e retorna o QR Code para scan.
 
-    Fluxo:
-      1. Verifica estado atual da sessão
-      2. Se WORKING → já conectado
-      3. Se STOPPED ou FAILED → inicia sessão
-      4. Se SCAN_QR → retorna QR
-      5. Se STARTING → aguarda e volta ao passo 4
+    Fluxo WAHA:
+      WORKING              → já conectado, retorna already_connected
+      STARTING / SCAN_QR   → sessão iniciando, aguarda e retorna QR
+      STOPPED / FAILED     → inicia sessão, aguarda SCAN_QR
+      Não existe (HTTP_404) → cria sessão e aguarda SCAN_QR
     """
     st = get_status()
 
     if st['status'] == 'WAHA_OFFLINE':
-        return {'error': 'WAHA está offline ou inacessível.'}
+        return {'error': 'WAHA está offline ou inacessível. Verifique o container.'}
 
-    if st['connected']:  # WORKING
+    if st.get('connected'):  # WORKING
         return {'already_connected': True}
 
-    # Inicia sessão se parada ou com falha
-    if st['status'] in ('STOPPED', 'FAILED', 'HTTP_404', 'UNKNOWN'):
-        _log('INFO', f'Iniciando sessão WAHA (status anterior: {st["status"]}).', origem='whatsapp')
-        created = _create_session()
-        if not created:
-            # Pode já existir — tenta dar start
-            try:
-                requests.post(_url(f'/api/sessions/{SESSION}/start'),
-                              headers=_h(), timeout=TIMEOUT)
-            except Exception:
-                pass
-        time.sleep(2)  # aguarda WAHA inicializar
-        st = get_status()
+    # Se não está rodando, garante que está iniciada
+    if st['status'] not in ('STARTING', 'SCAN_QR'):
+        _log('INFO', f'Iniciando sessão WAHA (status: {st["status"]}).', origem='whatsapp')
+        ok = _ensure_session_started()
+        if not ok:
+            return {'error': 'Não foi possível iniciar a sessão WAHA. Verifique os logs do container.'}
 
-    # Tenta obter QR
+    # Aguarda até SCAN_QR (máx 12s) com polling curto
+    for attempt in range(6):
+        time.sleep(2)
+        st = get_status()
+        if st.get('connected'):
+            return {'already_connected': True}
+        if st['status'] == 'SCAN_QR':
+            break
+        if st['status'] == 'FAILED':
+            return {'error': 'Sessão WAHA entrou em estado FAILED. Tente desconectar e reconectar.'}
+
+    # Busca o QR — pode ainda estar STARTING (retorna 'starting' para polling)
     return _fetch_qr()
 
 
+
 def _fetch_qr() -> Dict:
-    """Busca o QR code atual da sessão."""
+    """
+    Busca o QR code atual da sessão.
+
+    Retornos possíveis:
+      {'base64': '...', 'mimetype': 'image/png'}  → QR pronto para exibir
+      {'starting': True}                           → sessão iniciando, polling continua
+      {'error': '...'}                             → erro real
+    """
     try:
         r = requests.get(_url(f'/api/sessions/{SESSION}/qr'),
                          headers=_h(), timeout=TIMEOUT)
@@ -183,8 +212,13 @@ def _fetch_qr() -> Dict:
             if data.get('data'):
                 return {'base64': data['data'], 'mimetype': data.get('mimetype', 'image/png')}
         if r.status_code == 404:
-            return {'error': 'QR não disponível. A sessão pode ainda estar iniciando.'}
-        return {'error': f'Erro ao buscar QR: HTTP {r.status_code}'}
+            # 404 = sessão ainda não chegou em SCAN_QR (está STARTING)
+            # Não é erro — o frontend deve continuar fazendo polling
+            st = get_status()
+            if st.get('connected'):
+                return {'already_connected': True}
+            return {'starting': True, 'status': st.get('status', 'STARTING')}
+        return {'error': f'Erro ao buscar QR: HTTP {r.status_code} — {r.text[:200]}'}
     except Exception as e:
         return {'error': f'Erro ao buscar QR: {e}'}
 

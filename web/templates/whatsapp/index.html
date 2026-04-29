@@ -455,6 +455,17 @@ async function iniciarConexao() {
     const r    = await fetch('/whatsapp/api/conectar', { method: 'POST' });
     const data = await r.json();
 
+    if (data.status === 'iniciando') {
+      // Sessão ainda subindo — faz polling até o QR aparecer
+      document.getElementById('qrLoading').innerHTML = `
+        <span class="spinner" style="border-color:rgba(37,211,102,0.3);border-top-color:#25D366;width:32px;height:32px"></span>
+        <span style="font-size:12px">Iniciando sessão WAHA...</span>
+      `;
+      document.getElementById('qrLoading').style.display = 'flex';
+      iniciarPollingQR();
+      return;
+    }
+
     if (data.status === 'conectado') {
       await verificarStatus();
       showToast('WhatsApp já está conectado!', 'success');
@@ -529,6 +540,16 @@ async function carregarQR() {
       return;
     }
 
+    if (data.starting) {
+      // Ainda iniciando — atualiza mensagem e continua polling
+      document.getElementById('qrLoading').innerHTML = `
+        <span class="spinner" style="border-color:rgba(37,211,102,0.3);border-top-color:#25D366;width:32px;height:32px"></span>
+        <span style="font-size:12px">Aguardando WAHA... (${data.waha_status || 'STARTING'})</span>
+      `;
+      document.getElementById('qrLoading').style.display = 'flex';
+      return;
+    }
+
     if (data.qr) {
       exibirQR(data.qr);
     }
@@ -539,7 +560,7 @@ async function carregarQR() {
 
 function iniciarPollingQR() {
   pararPollingQR();
-  qrPolling = setInterval(carregarQR, 20000);  // Renova QR a cada 20s
+  qrPolling = setInterval(carregarQR, 5000);  // Renova QR a cada 5s
 }
 
 function pararPollingQR() {
