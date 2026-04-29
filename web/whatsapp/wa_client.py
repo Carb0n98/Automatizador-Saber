@@ -123,32 +123,86 @@ def _ensure_session_started() -> bool:
     """
     Garante que a sessão existe E está iniciada no WAHA.
 
-    Ciclo de vida WAHA:
-      Inexistente → POST /api/sessions (cria e inicia)
-      STOPPED     → POST /api/sessions/{name}/start
-      Já ativa    → 422 "already started" (tratamos como sucesso)
+    Fluxo correto por estado:
+      Não existe (404) → POST /api/sessions           (cria + inicia)
+      STOPPED / FAILED → POST /api/sessions/{name}/start (inicia existente)
+      STARTING         → já iniciando, ok
+      SCAN_QR          → QR pronto, ok
+      WORKING          → já conectado, ok
+
+    NUNCA faz POST /api/sessions se a sessão já existe.
+    NUNCA usa PUT (apenas para reconfigurar, não para conectar).
     """
-    try:
-        # Tenta criar (também inicia automaticamente)
-        r = requests.post(_url('/api/sessions'), headers=_h(), json={
-            'name': SESSION,
-            'config': {
-                'debug': False,
-                'noweb': {'store': {'enabled': True, 'fullSync': False}},
-            },
-        }, timeout=TIMEOUT)
-        # 200/201 = criada e iniciando
-        # 409 = já existe (não iniciada) → tenta start
-        # 422 = já existe e já está iniciada → OK
-        if r.ok or r.status_code == 422:
-            return True
-        if r.status_code == 409:
-            # Sessão existe mas parada — dá start
-            r2 = requests.post(_url(f'/api/sessions/{SESSION}/start'),
-                               headers=_h(), timeout=TIMEOUT)
-            return r2.ok or r2.status_code == 422
-    except Exception as e:
-        print(f'[WAHA] Erro ao criar/iniciar sessão: {e}')
+    st = get_status()
+    status = st.get('status', 'UNKNOWN')
+
+    _log('DEBUG', f'[WAHA] _ensure_session_started: status atual = {status}', origem='whatsapp')
+
+    # Já está em bom estado — não precisa fazer nada
+    if status in ('STARTING', 'SCAN_QR', 'WORKING'):
+        return True
+
+    # Sessão não existe → cria (POST /api/sessions)
+    if status in ('STOPPED', 'HTTP_404', 'UNKNOWN'):
+        # Tenta verificar se realmente não existe via 404
+        r_check = None
+        try:
+            r_check = requests.get(_url(f'/api/sessions/{SESSION}'),
+                                   headers=_h(), timeout=TIMEOUT)
+        except Exception:
+            pass
+
+        session_exists = r_check is not None and r_check.status_code != 404
+
+        if not session_exists:
+            # Criar sessão nova
+            _log('INFO', 'Criando sessão WAHA (não existia).', origem='whatsapp')
+            try:
+                r = requests.post(_url('/api/sessions'), headers=_h(), json={
+                    'name': SESSION,
+                    'config': {
+                        'debug': False,
+                        'noweb': {'store': {'enabled': True, 'fullSync': False}},
+                    },
+                }, timeout=TIMEOUT)
+                if r.ok:
+                    return True
+                print(f'[WAHA] POST /api/sessions → HTTP {r.status_code}: {r.text[:200]}')
+            except Exception as e:
+                print(f'[WAHA] Erro ao criar sessão: {e}')
+                return False
+
+        # Sessão existe mas está STOPPED/FAILED → usa start
+        _log('INFO', f'Iniciando sessão WAHA existente (status: {status}).', origem='whatsapp')
+        try:
+            r = requests.post(_url(f'/api/sessions/{SESSION}/start'),
+                              headers=_h(), timeout=TIMEOUT)
+            if r.ok:
+                return True
+            body = r.text[:200]
+            # "already started" = 422 — é sucesso
+            if r.status_code == 422 and 'already' in body.lower():
+                return True
+            print(f'[WAHA] POST /api/sessions/{SESSION}/start → HTTP {r.status_code}: {body}')
+            return False
+        except Exception as e:
+            print(f'[WAHA] Erro ao iniciar sessão: {e}')
+            return False
+
+    if status == 'FAILED':
+        # FAILED → tenta stop + start para resetar
+        _log('WARNING', 'Sessão WAHA em FAILED, tentando resetar.', origem='whatsapp')
+        try:
+            requests.post(_url(f'/api/sessions/{SESSION}/stop'),
+                          headers=_h(), timeout=TIMEOUT)
+            time.sleep(1)
+            r = requests.post(_url(f'/api/sessions/{SESSION}/start'),
+                              headers=_h(), timeout=TIMEOUT)
+            return r.ok
+        except Exception as e:
+            print(f'[WAHA] Erro ao resetar sessão FAILED: {e}')
+            return False
+
     return False
 
 
@@ -234,16 +288,19 @@ def get_qr() -> Dict:
 
 
 def disconnect() -> bool:
-    """Desconecta e para a sessão WAHA."""
+    """
+    Para a sessão WAHA (stop), mas NÃO deleta.
+
+    Manter a sessão no estado STOPPED permite reconectar via
+    POST /api/sessions/{name}/start sem precisar recriar.
+    Deletar causaria o erro 422 "already exists" na próxima criação.
+    """
     try:
-        requests.post(_url(f'/api/sessions/{SESSION}/stop'),
-                      headers=_h(), timeout=TIMEOUT)
-        time.sleep(1)
-        requests.delete(_url(f'/api/sessions/{SESSION}'),
-                        headers=_h(), timeout=TIMEOUT)
-        _log('INFO', 'Sessão WAHA desconectada manualmente.', origem='whatsapp')
-    except Exception:
-        pass
+        r = requests.post(_url(f'/api/sessions/{SESSION}/stop'),
+                          headers=_h(), timeout=TIMEOUT)
+        _log('INFO', f'Sessão WAHA parada (stop). HTTP {r.status_code}.', origem='whatsapp')
+    except Exception as e:
+        _log('WARNING', f'Erro ao parar sessão WAHA: {e}', origem='whatsapp')
     return True
 
 
