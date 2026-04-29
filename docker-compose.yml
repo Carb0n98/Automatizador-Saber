@@ -26,23 +26,19 @@ services:
   # ── WAHA — WhatsApp HTTP API ──────────────────────────────────────────────
   # Engine NOWEB: sem Chrome, sem banco externo, sessões persistidas em disco.
   # Substitui: evolution-api + evolution-postgres + evolution-redis (3 containers → 1)
+  # NOTA: porta NÃO exposta ao host — autoverifica acessa via rede Docker interna.
+  #       Isso evita conflito com outras aplicações que usem a porta 3000.
   waha:
     image: devlikeapro/waha
     container_name: waha
     restart: unless-stopped
-    ports:
-      - "3000:3000"
     volumes:
       - waha_sessions:/app/.sessions
     environment:
-      # Chave de autenticação usada no header X-Api-Key
       WAHA_API_KEY: "autoverifica-waha-key-2024"
-      # Engine NOWEB: não usa Chrome, muito mais estável e leve (~100MB RAM)
       WHATSAPP_DEFAULT_ENGINE: NOWEB
-      # Não exibir QR no terminal (gerenciamos via API)
       WAHA_PRINT_QR: "false"
       LOG_LEVEL: "info"
-      # Desabilita a autenticação do dashboard (opcional — só acessível internamente)
       WAHA_DASHBOARD_ENABLED: "true"
 
 volumes:
