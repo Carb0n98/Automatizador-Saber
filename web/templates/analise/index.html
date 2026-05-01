@@ -1,0 +1,410 @@
+{% extends 'base.html' %}
+
+{% block page_title %}Análise Mensal{% endblock %}
+{% block page_subtitle %}Métricas e relatórios de verificações ocupacionais{% endblock %}
+
+{% block topbar_actions %}
+<div class="d-flex gap-2">
+  <select id="mesSelect" class="form-select" onchange="carregarDados()">
+    {% for m in meses_disponiveis %}
+    <option value="{{ m.value }}" {% if m.ano == ano and m.mes == mes %}selected{% endif %}>
+      {{ m.label }}
+    </option>
+    {% endfor %}
+  </select>
+  <button class="btn-action primary" onclick="carregarDados()">
+    <i class="bi bi-arrow-clockwise"></i>
+  </button>
+</div>
+{% endblock %}
+
+{% block content %}
+<div id="loading" class="text-center py-5" style="display: none;">
+  <div class="spinner" style="width: 40px; height: 40px;"></div>
+  <p class="mt-3 text-muted">Carregando métricas...</p>
+</div>
+
+<div id="dashboardContent">
+  <!-- Top Cards -->
+  <div class="dashboard-grid mb-4">
+    <div class="stat-card">
+      <div class="stat-icon" style="color: var(--primary); background: rgba(33,150,243,0.1)">
+        <i class="bi bi-file-earmark-text"></i>
+      </div>
+      <div class="stat-info">
+        <h3>Total no Mês</h3>
+        <p class="stat-number" id="valTotal">0</p>
+        <span class="stat-desc" id="deltaTotal">--</span>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="color: var(--success); background: rgba(37,211,102,0.1)">
+        <i class="bi bi-check-circle"></i>
+      </div>
+      <div class="stat-info">
+        <h3>Aptos</h3>
+        <p class="stat-number" id="valAptos">0 <span style="font-size: 14px; color: var(--text-muted)" id="valPctAptos">(0%)</span></p>
+        <span class="stat-desc" id="deltaAptos">--</span>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="color: var(--warning); background: rgba(255,193,7,0.1)">
+        <i class="bi bi-clock-history"></i>
+      </div>
+      <div class="stat-info">
+        <h3>Pendentes</h3>
+        <p class="stat-number" id="valPendentes">0</p>
+        <span class="stat-desc" id="deltaPendentes">--</span>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="color: var(--danger); background: rgba(244,67,54,0.1)">
+        <i class="bi bi-exclamation-triangle"></i>
+      </div>
+      <div class="stat-info">
+        <h3>Atrasados (Urgente)</h3>
+        <p class="stat-number" id="valAtrasados">0</p>
+        <span class="stat-desc">Venceram até hoje</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <!-- Gráfico de Cargos -->
+    <div class="col-lg-8 mb-4">
+      <div class="card h-100">
+        <div class="card-header">
+          <h3>Distribuição por Cargo</h3>
+        </div>
+        <div class="card-body">
+          <canvas id="chartCargos"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tabela Ranking -->
+    <div class="col-lg-4 mb-4">
+      <div class="card h-100">
+        <div class="card-header">
+          <h3>Cargos com + Pendências</h3>
+        </div>
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table mb-0">
+              <thead>
+                <tr>
+                  <th>Cargo</th>
+                  <th class="text-center">Pendentes</th>
+                </tr>
+              </thead>
+              <tbody id="tbodyRanking">
+                <!-- Preenchido via JS -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <!-- Gráfico Diário -->
+    <div class="col-12 mb-4">
+      <div class="card">
+        <div class="card-header">
+          <h3>Evolução Diária (<span id="lblMesAtual">Mês</span>)</h3>
+        </div>
+        <div class="card-body">
+          <canvas id="chartDiario" height="80"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+/* Ajustes específicos de UI do Dashboard de Análise */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1.5rem;
+}
+.stat-desc.positivo {
+  color: var(--success);
+}
+.stat-desc.negativo {
+  color: var(--danger);
+}
+.stat-desc.neutro {
+  color: var(--text-muted);
+}
+.card {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+.card-header {
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255,255,255,0.02);
+}
+.card-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.card-body {
+  padding: 1.5rem;
+}
+.table th {
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+.table td {
+  vertical-align: middle;
+}
+.badge-danger {
+  background: rgba(244,67,54,0.1);
+  color: var(--danger);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+</style>
+
+<script>
+let chartCargosInst = null;
+let chartDiarioInst = null;
+
+// Configuração global de fontes e cores do Chart.js para combinar com o tema
+Chart.defaults.color = '#8892b0';
+Chart.defaults.font.family = "'Inter', sans-serif";
+Chart.defaults.plugins.tooltip.backgroundColor = 'rgba(15, 23, 42, 0.9)';
+Chart.defaults.plugins.tooltip.titleColor = '#e2e8f0';
+Chart.defaults.plugins.tooltip.bodyColor = '#cbd5e1';
+Chart.defaults.plugins.tooltip.padding = 10;
+Chart.defaults.plugins.tooltip.cornerRadius = 8;
+Chart.defaults.plugins.tooltip.displayColors = true;
+
+document.addEventListener('DOMContentLoaded', () => {
+    carregarDados();
+});
+
+function formatDelta(valor, isPercentage = false) {
+    if (valor === 0) return `<span class="stat-desc neutro"><i class="bi bi-dash"></i> igual mês ant.</span>`;
+    const signal = valor > 0 ? '+' : '';
+    const colorClass = valor > 0 ? 'positivo' : 'negativo';
+    const icon = valor > 0 ? 'arrow-up-right' : 'arrow-down-right';
+    const suffix = isPercentage ? '%' : '';
+    return `<span class="stat-desc ${colorClass}"><i class="bi bi-${icon}"></i> ${signal}${valor}${suffix} vs mês ant.</span>`;
+}
+
+// Para pendentes, subir é negativo (ruim), cair é positivo (bom)
+function formatDeltaInverted(valor) {
+    if (valor === 0) return `<span class="stat-desc neutro"><i class="bi bi-dash"></i> igual mês ant.</span>`;
+    const signal = valor > 0 ? '+' : '';
+    const colorClass = valor > 0 ? 'negativo' : 'positivo';
+    const icon = valor > 0 ? 'arrow-up-right' : 'arrow-down-right';
+    return `<span class="stat-desc ${colorClass}"><i class="bi bi-${icon}"></i> ${signal}${valor} vs mês ant.</span>`;
+}
+
+async function carregarDados() {
+    const sel = document.getElementById('mesSelect').value;
+    if (!sel) return;
+    
+    const [ano, mes] = sel.split('-');
+    
+    document.getElementById('dashboardContent').style.display = 'none';
+    document.getElementById('loading').style.display = 'block';
+    
+    try {
+        const res = await fetch(`/analise/api/mensal?ano=${ano}&mes=${mes}`);
+        const data = await res.json();
+        
+        if (data.status === 'ok') {
+            renderDashboard(data.data);
+            document.getElementById('dashboardContent').style.display = 'block';
+        } else {
+            showToast(data.mensagem || 'Erro ao carregar dados', 'error');
+        }
+    } catch (e) {
+        showToast('Erro de conexão ao carregar dados', 'error');
+        console.error(e);
+    } finally {
+        document.getElementById('loading').style.display = 'none';
+    }
+}
+
+function renderDashboard(data) {
+    // 1. Atualizar Top Cards
+    document.getElementById('valTotal').innerText = data.totais.total;
+    document.getElementById('valAptos').innerHTML = `${data.totais.aptos} <span style="font-size: 14px; color: var(--text-muted)">(${data.totais.pct_aptos}%)</span>`;
+    document.getElementById('valPendentes').innerText = data.totais.pendentes;
+    document.getElementById('valAtrasados').innerText = data.totais.atrasados;
+    
+    document.getElementById('deltaTotal').innerHTML = formatDelta(data.vs_mes_anterior.total_delta);
+    document.getElementById('deltaAptos').innerHTML = formatDelta(data.vs_mes_anterior.aptos_delta);
+    
+    const pendentesDelta = data.vs_mes_anterior.total_delta - data.vs_mes_anterior.aptos_delta;
+    document.getElementById('deltaPendentes').innerHTML = formatDeltaInverted(pendentesDelta);
+    
+    document.getElementById('lblMesAtual').innerText = data.periodo.label;
+
+    // 2. Tabela Ranking de Pendências
+    // Ordenar cargos por número de pendentes (descendente)
+    const cargosPendentes = [...data.por_cargo]
+        .filter(c => c.pendentes > 0)
+        .sort((a, b) => b.pendentes - a.pendentes)
+        .slice(0, 6); // Top 6
+        
+    const tbody = document.getElementById('tbodyRanking');
+    if (cargosPendentes.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="2" class="text-center text-muted py-4">Nenhuma pendência neste mês! 🎉</td></tr>`;
+    } else {
+        tbody.innerHTML = cargosPendentes.map(c => `
+            <tr>
+                <td><div class="text-truncate" style="max-width: 200px;" title="${c.cargo}">${c.cargo}</div></td>
+                <td class="text-center"><span class="badge-danger">${c.pendentes}</span></td>
+            </tr>
+        `).join('');
+    }
+
+    // 3. Gráfico de Cargos (Aptos vs Pendentes)
+    renderChartCargos(data.por_cargo);
+    
+    // 4. Gráfico Diário
+    renderChartDiario(data.por_dia);
+}
+
+function renderChartCargos(porCargo) {
+    const ctx = document.getElementById('chartCargos').getContext('2d');
+    
+    if (chartCargosInst) {
+        chartCargosInst.destroy();
+    }
+    
+    // Pegar top 10 cargos por volume total para não poluir o gráfico
+    const topCargos = [...porCargo].sort((a, b) => b.total - a.total).slice(0, 10);
+    
+    chartCargosInst = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: topCargos.map(c => c.cargo.length > 15 ? c.cargo.substring(0, 15) + '...' : c.cargo),
+            datasets: [
+                {
+                    label: 'Aptos',
+                    data: topCargos.map(c => c.aptos),
+                    backgroundColor: 'rgba(37, 211, 102, 0.8)',
+                    borderColor: 'rgb(37, 211, 102)',
+                    borderWidth: 1,
+                    borderRadius: 4
+                },
+                {
+                    label: 'Pendentes',
+                    data: topCargos.map(c => c.pendentes),
+                    backgroundColor: 'rgba(255, 193, 7, 0.8)',
+                    borderColor: 'rgb(255, 193, 7)',
+                    borderWidth: 1,
+                    borderRadius: 4
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: { 
+                    stacked: true,
+                    grid: { color: 'rgba(255, 255, 255, 0.05)' }
+                },
+                y: { 
+                    stacked: true,
+                    beginAtZero: true,
+                    grid: { color: 'rgba(255, 255, 255, 0.05)' }
+                }
+            },
+            plugins: {
+                legend: { position: 'top' },
+                tooltip: {
+                    callbacks: {
+                        title: (context) => topCargos[context[0].dataIndex].cargo
+                    }
+                }
+            }
+        }
+    });
+}
+
+function renderChartDiario(porDia) {
+    const ctx = document.getElementById('chartDiario').getContext('2d');
+    
+    if (chartDiarioInst) {
+        chartDiarioInst.destroy();
+    }
+    
+    chartDiarioInst = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: porDia.map(d => d.dia),
+            datasets: [
+                {
+                    label: 'Aptos',
+                    data: porDia.map(d => d.aptos),
+                    borderColor: 'rgb(37, 211, 102)',
+                    backgroundColor: 'rgba(37, 211, 102, 0.1)',
+                    borderWidth: 2,
+                    pointRadius: 3,
+                    pointHoverRadius: 5,
+                    fill: true,
+                    tension: 0.3
+                },
+                {
+                    label: 'Pendentes',
+                    data: porDia.map(d => d.pendentes),
+                    borderColor: 'rgb(255, 193, 7)',
+                    backgroundColor: 'rgba(255, 193, 7, 0.1)',
+                    borderWidth: 2,
+                    pointRadius: 3,
+                    pointHoverRadius: 5,
+                    fill: true,
+                    tension: 0.3
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                mode: 'index',
+                intersect: false,
+            },
+            scales: {
+                x: {
+                    grid: { display: false },
+                    title: { display: true, text: 'Dia do Mês' }
+                },
+                y: {
+                    beginAtZero: true,
+                    grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                    ticks: { stepSize: 1 }
+                }
+            },
+            plugins: {
+                legend: { position: 'top' }
+            }
+        }
+    });
+}
+</script>
+{% endblock %}

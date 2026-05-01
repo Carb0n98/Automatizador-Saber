@@ -44,6 +44,7 @@ PERMISSIONS = {
     'editar_telefone':         'Alterar Número de WhatsApp / Telefone',
     'gerenciar_usuarios':      'Gerenciar Usuários (somente admin)',
     'ver_logs':                'Ver Painel de Logs do Sistema',
+    'ver_analise':             'Ver Análise Mensal de Verificações',
 }
 
 

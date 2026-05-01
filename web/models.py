@@ -83,11 +83,15 @@ class User(UserMixin, db.Model):
 
 class Verificacao(db.Model):
     __tablename__ = 'verificacoes'
+    # Índice composto para queries mensais: WHERE data_verificacao BETWEEN x AND y AND status = ?
+    __table_args__ = (
+        db.Index('ix_verif_data_status', 'data_verificacao', 'status'),
+    )
     id = db.Column(db.Integer, primary_key=True)
     nome = db.Column(db.String(200), nullable=False)
     cargo = db.Column(db.String(200))
     atividade = db.Column(db.String(300))
-    data_verificacao = db.Column(db.Date)
+    data_verificacao = db.Column(db.Date, index=True)
     status = db.Column(db.String(50), default='pendente')   # pendente / apto
     origem = db.Column(db.String(20), default='manual')     # manual / automatico
     criado_em = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))

@@ -41,6 +41,7 @@ def create_app():
     from .usuarios.routes import usuarios_bp
     from .whatsapp.routes import whatsapp_bp
     from .logs.routes import logs_bp
+    from .analise.routes import analise_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(dashboard_bp)
@@ -50,12 +51,14 @@ def create_app():
     app.register_blueprint(usuarios_bp)
     app.register_blueprint(whatsapp_bp)
     app.register_blueprint(logs_bp)
+    app.register_blueprint(analise_bp)
 
     # DB + migrações automáticas + seed
     with app.app_context():
         db.create_all()
         from .utils import migrate_user_columns
         migrate_user_columns(db)
+        _create_indices(db)
         _seed_admin()
         _seed_default_config()
 
@@ -125,3 +128,13 @@ def _seed_default_config():
             changed = True
     if changed:
         db.session.commit()
+
+
+def _create_indices(db):
+    try:
+        from sqlalchemy import text
+        with db.engine.connect() as conn:
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_verif_data_status ON verificacoes (data_verificacao, status)"))
+            conn.commit()
+    except Exception as e:
+        print(f"[MIGRATE] Aviso ao criar índice: {e}")
