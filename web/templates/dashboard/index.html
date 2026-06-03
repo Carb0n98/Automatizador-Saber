@@ -115,7 +115,7 @@
       <i class="bi bi-bullseye" style="color:var(--primary-l)"></i> Meta do Mês
     </div>
     <div style="font-size:15px; font-weight:700; color:var(--text)">
-      {{ aptos_mes }} <span style="font-size:12px; font-weight:500; color:var(--text-m)">/ {{ total_mes }} executados</span>
+      {{ verificados_mes }} <span style="font-size:12px; font-weight:500; color:var(--text-m)">/ {{ total_mes }} executados</span>
       <span style="font-size:12.5px; font-weight:700; color:var(--primary-l); margin-left:8px">({{ progresso_pct }}%)</span>
     </div>
   </div>
@@ -164,11 +164,11 @@
 
   <div class="stat-card green" style="--border-top-color:#10b981">
     <div class="stat-top">
-      <div class="stat-label">Aptos</div>
+      <div class="stat-label">Verificados</div>
       <div class="stat-icon"><i class="bi bi-patch-check"></i></div>
     </div>
-    <div class="stat-value" id="statAptos">{{ aptos }}</div>
-    <div class="stat-footer">Treinamentos concluídos</div>
+    <div class="stat-value" id="statVerificados">{{ verificados }}</div>
+    <div class="stat-footer">Verificações concluídas</div>
   </div>
 </div>
 

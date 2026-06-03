@@ -98,8 +98,8 @@
     style="--tab-danger:rgba(239,68,68,0.15)">
     <i class="bi bi-exclamation-triangle"></i> Atrasados
   </button>
-  <button class="tab-btn" id="tabAptos" onclick="setTab('apto')">
-    <i class="bi bi-check-circle"></i> Aptos
+  <button class="tab-btn" id="tabVerificados" onclick="setTab('verificado')">
+    <i class="bi bi-check-circle"></i> Verificados
   </button>
 </div>
 
@@ -191,10 +191,10 @@ function setTab(status) {
     b.style.borderColor = '';
   });
   const map = {
-    '':         'tabTodos',
-    'pendente': 'tabPendentes',
-    'atrasado': 'tabAtrasados',
-    'apto':     'tabAptos'
+    '':           'tabTodos',
+    'pendente':   'tabPendentes',
+    'atrasado':   'tabAtrasados',
+    'verificado': 'tabVerificados'
   };
   const btn = document.getElementById(map[status]);
   if (btn) {
@@ -262,8 +262,9 @@ async function loadData() {
 const CAN_MANAGE = {{ can_manage | tojson }};
 
 const statusBadge = {
-  'pendente': '<span class="badge badge-warning"><i class="bi bi-hourglass-split"></i> Não verificado</span>',
-  'apto':     '<span class="badge badge-success"><i class="bi bi-check-circle"></i> Apto</span>',
+  'pendente':          '<span class="badge badge-warning"><i class="bi bi-hourglass-split"></i> Não verificado</span>',
+  'apto':              '<span class="badge badge-success"><i class="bi bi-check-circle"></i> Verificado</span>',
+  'parcialmente_apto': '<span class="badge badge-info"><i class="bi bi-check2"></i> Parcialmente Verificado</span>',
 };
 
 const origemBadge = {
@@ -294,9 +295,9 @@ function renderTable(rows) {
       <td>${origemBadge[v.origem] || v.origem}</td>
       ${CAN_MANAGE ? `<td>
         <div class="action-btns">
-          ${v.status !== 'apto' ? `
-          <button class="btn btn-success btn-icon btn-sm" title="Marcar como Apto"
-            onclick="confirmarAcao('apto', ${v.id}, '${escHtml(v.nome)}')">
+          ${(v.status !== 'apto' && v.status !== 'parcialmente_apto') ? `
+          <button class="btn btn-success btn-icon btn-sm" title="Marcar como Verificado"
+            onclick="confirmarAcao('verificado', ${v.id}, '${escHtml(v.nome)}')">
             <i class="bi bi-check-lg"></i>
           </button>` : ''}
           <button class="btn btn-danger btn-icon btn-sm" title="Excluir"
@@ -335,11 +336,11 @@ function confirmarAcao(tipo, id, nome) {
   const modal = document.getElementById('confirmModal');
   const btn = document.getElementById('modalConfirm');
 
-  if (tipo === 'apto') {
-    document.getElementById('modalTitle').textContent = 'Marcar como Apto';
-    document.getElementById('modalBody').textContent = `Deseja marcar "${nome}" como APTO?`;
+  if (tipo === 'verificado') {
+    document.getElementById('modalTitle').textContent = 'Marcar como Verificado';
+    document.getElementById('modalBody').textContent = `Deseja marcar "${nome}" como VERIFICADO?`;
     btn.className = 'btn btn-success';
-    btn.textContent = 'Marcar como Apto';
+    btn.textContent = 'Marcar como Verificado';
   } else {
     document.getElementById('modalTitle').textContent = 'Excluir Registro';
     document.getElementById('modalBody').textContent = `Tem certeza que deseja excluir "${nome}"? Esta ação não pode ser desfeita.`;
@@ -361,8 +362,8 @@ async function executarAcao() {
   const {tipo, id} = pendingAction;
   closeModal();
 
-  const url = tipo === 'apto'
-    ? `/verificacoes/${id}/marcar-apto`
+  const url = tipo === 'verificado'
+    ? `/verificacoes/${id}/marcar-verificado`
     : `/verificacoes/${id}/excluir`;
 
   // Fix #12: verificar r.ok antes de processar resposta

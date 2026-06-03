@@ -37,7 +37,7 @@ def now_local():
 # ─── Catálogo de permissões disponíveis no sistema ─────────────────────────
 PERMISSIONS = {
     'efetuar_busca':           'Efetuar Buscas no SABER',
-    'gerenciar_verificacoes':  'Gerenciar Verificações (marcar APTO, excluir)',
+    'gerenciar_verificacoes':  'Gerenciar Verificações (marcar Verificado, excluir)',
     'ver_mensagens':           'Ver Mensagens e Resumo Diário',
     'gerenciar_templates':     'Criar / Editar / Excluir Templates de Mensagem',
     'editar_credenciais_saber':'Alterar Credenciais do SABER (URL, usuário, senha)',

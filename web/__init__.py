@@ -135,6 +135,7 @@ def _create_indices(db):
         from sqlalchemy import text
         with db.engine.connect() as conn:
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_verif_data_status ON verificacoes (data_verificacao, status)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_verif_status ON verificacoes (status)"))
             conn.commit()
     except Exception as e:
         print(f"[MIGRATE] Aviso ao criar índice: {e}")

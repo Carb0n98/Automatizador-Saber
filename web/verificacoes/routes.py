@@ -51,6 +51,9 @@ def api_list():
             Verificacao.status == 'pendente',
             Verificacao.data_verificacao < hoje
         )
+    elif status == 'verificado':
+        from ..constants import VERIFICADO_STATUSES
+        query = query.filter(Verificacao.status.in_(VERIFICADO_STATUSES))
     elif status:
         query = query.filter(Verificacao.status == status)
 
@@ -87,6 +90,7 @@ def api_list():
 
 
 @verificacoes_bp.route('/<int:vid>/marcar-apto', methods=['POST'])
+@verificacoes_bp.route('/<int:vid>/marcar-verificado', methods=['POST'])
 @login_required
 @require_perm('gerenciar_verificacoes')
 def marcar_apto(vid):
@@ -95,7 +99,7 @@ def marcar_apto(vid):
         return jsonify({'status': 'erro', 'mensagem': 'Registro não encontrado.'}), 404
     v.status = 'apto'
     db.session.commit()
-    return jsonify({'status': 'ok', 'mensagem': f'{v.nome} marcado como APTO.'})
+    return jsonify({'status': 'ok', 'mensagem': f'{v.nome} marcado como VERIFICADO.'})
 
 
 @verificacoes_bp.route('/<int:vid>/excluir', methods=['POST'])

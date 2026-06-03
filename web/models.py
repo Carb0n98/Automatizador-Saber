@@ -92,9 +92,14 @@ class Verificacao(db.Model):
     cargo = db.Column(db.String(200))
     atividade = db.Column(db.String(300))
     data_verificacao = db.Column(db.Date, index=True)
-    status = db.Column(db.String(50), default='pendente')   # pendente / apto
+    status = db.Column(db.String(50), default='pendente')   # pendente / apto / parcialmente_apto
     origem = db.Column(db.String(20), default='manual')     # manual / automatico
     criado_em = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    def is_verificado(self):
+        """Retorna True se este registro conta como 'Verificado'."""
+        from .constants import is_verificado
+        return is_verificado(self.status)
 
     def to_dict(self):
         return {

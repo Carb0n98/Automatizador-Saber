@@ -186,7 +186,8 @@ def executar_coleta(app, origem='automatico'):
 
             # INSERT / UPDATE: processa cada linha coletada do SABER
             for d in todos_dados:
-                status_saber = 'apto' if d['status_raw'] == 'APTO' else 'pendente'
+                from .constants import SABER_STATUS_MAP, is_verificado
+                status_saber = SABER_STATUS_MAP.get(d['status_raw'], 'pendente')
                 try:
                     data_verif = datetime.strptime(d['data'], '%d/%m/%Y').date()
                 except Exception:
@@ -198,11 +199,10 @@ def executar_coleta(app, origem='automatico'):
                 ).first()
 
                 if existe:
-                    # Só atualiza status se o SABER mudou para APTO
-                    # (nunca rebaixa uma marcação manual de APTO para pendente)
-                    if status_saber == 'apto' and existe.status != 'apto':
-                        existe.status = 'apto'
-                        # Atualiza cargo/atividade caso tenham mudado no SABER
+                    # Só atualiza status se o SABER mudou para um status verificado
+                    # (nunca rebaixa uma marcação verificada para pendente)
+                    if is_verificado(status_saber) and not is_verificado(existe.status):
+                        existe.status = status_saber
                         existe.cargo = d['cargo']
                         existe.atividade = d['atividade']
                         atualizados += 1
@@ -236,7 +236,7 @@ def executar_coleta(app, origem='automatico'):
             db.session.commit()
 
             msg = (f'{novos} novos. '
-                   f'{atualizados} atualizados para APTO. '
+                   f'{atualizados} atualizados para VERIFICADO. '
                    f'{removidos} removidos (desligados/não encontrados no SABER).')
             _finalizar_log(db, LogAutomacao, log_id, 'sucesso', novos + atualizados, msg)
             log_info(msg, origem='scheduler')

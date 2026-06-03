@@ -11,24 +11,32 @@ dashboard_bp = Blueprint('dashboard', __name__)
 def index():
     from ..models import Verificacao, LogAutomacao, Config
     from ..extensions import db
-    from sqlalchemy import extract
+    from ..constants import VERIFICADO_STATUSES
+    import calendar
 
     hoje = hoje_local()
     agora = now_local()
     tz_nome = Config.get('timezone', 'America/Sao_Paulo')
 
+    # Limites do mês atual (BETWEEN otimizado para índice ix_verif_data_status)
+    from datetime import date
+    primeiro_dia = date(hoje.year, hoje.month, 1)
+    ultimo_dia = date(hoje.year, hoje.month, calendar.monthrange(hoje.year, hoje.month)[1])
+
+    # Total de registros no mês atual (por data_verificacao)
     total_mes = Verificacao.query.filter(
-        extract('month', Verificacao.criado_em) == hoje.month,
-        extract('year', Verificacao.criado_em) == hoje.year
+        Verificacao.data_verificacao >= primeiro_dia,
+        Verificacao.data_verificacao <= ultimo_dia,
     ).count()
 
-    aptos_mes = Verificacao.query.filter(
-        Verificacao.status == 'apto',
-        extract('month', Verificacao.data_verificacao) == hoje.month,
-        extract('year', Verificacao.data_verificacao) == hoje.year
+    # Verificados no mês (apto + parcialmente_apto)
+    verificados_mes = Verificacao.query.filter(
+        Verificacao.status.in_(VERIFICADO_STATUSES),
+        Verificacao.data_verificacao >= primeiro_dia,
+        Verificacao.data_verificacao <= ultimo_dia,
     ).count()
 
-    progresso_pct = int((aptos_mes / total_mes) * 100) if total_mes > 0 else 0
+    progresso_pct = int((verificados_mes / total_mes) * 100) if total_mes > 0 else 0
 
     # Card "Hoje" dinâmico: apenas pendentes do dia
     nao_verificados_hoje = Verificacao.query.filter(
@@ -36,12 +44,24 @@ def index():
         Verificacao.status == 'pendente'
     ).count()
 
-    nao_verificados = Verificacao.query.filter_by(status='pendente').count()
-    aptos = Verificacao.query.filter_by(status='apto').count()
+    # Não verificados no mês atual
+    nao_verificados = Verificacao.query.filter(
+        Verificacao.status == 'pendente',
+        Verificacao.data_verificacao >= primeiro_dia,
+        Verificacao.data_verificacao <= ultimo_dia,
+    ).count()
 
-    # Atrasados: pendentes com data anterior a hoje
+    # Verificados no mês atual (total)
+    verificados = Verificacao.query.filter(
+        Verificacao.status.in_(VERIFICADO_STATUSES),
+        Verificacao.data_verificacao >= primeiro_dia,
+        Verificacao.data_verificacao <= ultimo_dia,
+    ).count()
+
+    # Atrasados: pendentes com data anterior a hoje (dentro do mês atual)
     atrasados = Verificacao.query.filter(
         Verificacao.status == 'pendente',
+        Verificacao.data_verificacao >= primeiro_dia,
         Verificacao.data_verificacao < hoje
     ).count()
 
@@ -61,11 +81,11 @@ def index():
     return render_template('dashboard/index.html',
         active='dashboard',
         total_mes=total_mes,
-        aptos_mes=aptos_mes,
+        verificados_mes=verificados_mes,
         progresso_pct=progresso_pct,
         nao_verificados_hoje=nao_verificados_hoje,
         nao_verificados=nao_verificados,
-        aptos=aptos,
+        verificados=verificados,
         atrasados=atrasados,
         ultimo_log=ultimo_log,
         ultimos_logs=ultimos_logs,
@@ -76,6 +96,7 @@ def index():
         hora_atual=agora.strftime('%H:%M'),
         tz_offset=tz_offset,
     )
+
 
 
 @dashboard_bp.route('/api/buscar', methods=['POST'])
