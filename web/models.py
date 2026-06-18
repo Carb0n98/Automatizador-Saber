@@ -48,6 +48,11 @@ class User(UserMixin, db.Model):
     ativo = db.Column(db.Boolean, default=True, nullable=False)
     permissions = db.Column(db.Text, default='[]')  # JSON list of permission keys
 
+    # Segurança: rastreio de sessão e proteção brute-force
+    ultimo_login = db.Column(db.DateTime, nullable=True)
+    tentativas_login = db.Column(db.Integer, default=0, nullable=False)
+    bloqueado_ate = db.Column(db.DateTime, nullable=True)
+
     def has_perm(self, perm):
         """Admin tem todas as permissões. Outros verificam na lista."""
         if self.is_admin:
@@ -63,6 +68,31 @@ class User(UserMixin, db.Model):
     def set_perms(self, perm_list):
         self.permissions = json.dumps(list(set(perm_list)))
 
+    def is_bloqueado(self):
+        """Retorna True se a conta está temporariamente bloqueada por brute-force."""
+        if self.bloqueado_ate is None:
+            return False
+        agora = datetime.now(timezone.utc)
+        if agora < self.bloqueado_ate:
+            return True
+        # Bloqueio expirou — resetar
+        self.bloqueado_ate = None
+        self.tentativas_login = 0
+        return False
+
+    def registrar_login_falho(self):
+        """Incrementa tentativas e bloqueia após 5 falhas."""
+        self.tentativas_login = (self.tentativas_login or 0) + 1
+        if self.tentativas_login >= 5:
+            from datetime import timedelta
+            self.bloqueado_ate = datetime.now(timezone.utc) + timedelta(minutes=15)
+
+    def registrar_login_sucesso(self):
+        """Reseta contadores e registra timestamp do login."""
+        self.tentativas_login = 0
+        self.bloqueado_ate = None
+        self.ultimo_login = datetime.now(timezone.utc)
+
     def to_dict(self):
         return {
             'id': self.id,
@@ -70,6 +100,7 @@ class User(UserMixin, db.Model):
             'is_admin': self.is_admin,
             'ativo': self.ativo,
             'permissions': self.get_perms(),
+            'ultimo_login': self.ultimo_login.strftime('%d/%m/%Y %H:%M') if self.ultimo_login else 'Nunca',
         }
 
     # Flask-Login: desativar conta impede sessão
@@ -83,8 +114,10 @@ class User(UserMixin, db.Model):
 
 class Verificacao(db.Model):
     __tablename__ = 'verificacoes'
-    # Índice composto para queries mensais: WHERE data_verificacao BETWEEN x AND y AND status = ?
     __table_args__ = (
+        # Constraint UNIQUE para prevenir duplicatas
+        db.UniqueConstraint('nome', 'data_verificacao', 'atividade', name='uq_verif_nome_data_ativ'),
+        # Índice composto para queries mensais
         db.Index('ix_verif_data_status', 'data_verificacao', 'status'),
     )
     id = db.Column(db.Integer, primary_key=True)
@@ -102,6 +135,7 @@ class Verificacao(db.Model):
         return is_verificado(self.status)
 
     def to_dict(self):
+        from .constants import STATUS_DISPLAY
         return {
             'id': self.id,
             'nome': self.nome,
@@ -109,6 +143,7 @@ class Verificacao(db.Model):
             'atividade': self.atividade,
             'data_verificacao': self.data_verificacao.strftime('%d/%m/%Y') if self.data_verificacao else '',
             'status': self.status,
+            'status_display': STATUS_DISPLAY.get(self.status, self.status),
             'origem': self.origem,
             'criado_em': self.criado_em.strftime('%d/%m/%Y %H:%M') if self.criado_em else '',
         }

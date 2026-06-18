@@ -2,7 +2,7 @@
 Logger centralizado do sistema.
 
 Uso em qualquer módulo:
-    from .logger import log_info, log_warn, log_error, log_debug
+    from .logger import log_info, log_warn, log_error, log_debug, log_audit
 
 Todas as funções são seguras fora de app_context (falham silenciosamente).
 """
@@ -58,6 +58,42 @@ def log_error(mensagem: str, exc: Exception = None, **kw) -> None:
 def log_debug(mensagem: str, **kw) -> None:
     """Registra mensagem de debug (apenas em desenvolvimento)."""
     log('DEBUG', mensagem, **kw)
+
+
+def log_audit(mensagem: str, **kw) -> None:
+    """
+    Registra ação de auditoria (login, alteração de dados, exclusão).
+    Captura automaticamente IP e user-agent quando em contexto de request.
+    """
+    detalhe_parts = []
+
+    # Capturar contexto de request se disponível
+    try:
+        from flask import request as req, has_request_context
+        if has_request_context():
+            ip = req.headers.get('X-Forwarded-For', req.remote_addr)
+            ua = req.headers.get('User-Agent', 'N/A')[:200]
+            detalhe_parts.append(f'IP: {ip}')
+            detalhe_parts.append(f'User-Agent: {ua}')
+    except Exception:
+        pass
+
+    # Capturar usuário se logado
+    usuario = kw.pop('usuario', None)
+    if usuario is None:
+        try:
+            from flask_login import current_user
+            if current_user and current_user.is_authenticated:
+                usuario = current_user.username
+        except Exception:
+            pass
+
+    existing_detalhe = kw.pop('detalhe', None)
+    if existing_detalhe:
+        detalhe_parts.append(str(existing_detalhe))
+
+    detalhe = '\n'.join(detalhe_parts) if detalhe_parts else None
+    log('INFO', f'[AUDIT] {mensagem}', detalhe=detalhe, usuario=usuario, **kw)
 
 
 def purge_old_logs(days: int = 30) -> int:

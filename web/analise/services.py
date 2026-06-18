@@ -377,3 +377,66 @@ def get_meses_disponiveis() -> List[Dict]:
         except Exception:
             pass
     return result
+
+
+def get_integridade_dados(ano: int, mes: int) -> Dict:
+    """
+    Analisa a integridade dos dados do mês.
+    Retorna métricas de qualidade para validação.
+    """
+    d_ini, d_fim = _mes_bounds(ano, mes)
+
+    # Total de registros no mês
+    total = Verificacao.query.filter(
+        Verificacao.data_verificacao >= d_ini,
+        Verificacao.data_verificacao <= d_fim,
+    ).count()
+
+    # Registros sem data
+    sem_data = Verificacao.query.filter(
+        Verificacao.data_verificacao.is_(None),
+    ).count()
+
+    # Registros duplicados potenciais (mesmo nome+data+atividade)
+    from sqlalchemy import func as sa_func
+    dupes = db.session.query(
+        sa_func.count(Verificacao.id)
+    ).filter(
+        Verificacao.data_verificacao >= d_ini,
+        Verificacao.data_verificacao <= d_fim,
+    ).group_by(
+        Verificacao.nome,
+        Verificacao.data_verificacao,
+        Verificacao.atividade,
+    ).having(sa_func.count(Verificacao.id) > 1).count()
+
+    # Registros automáticos vs manuais
+    automaticos = Verificacao.query.filter(
+        Verificacao.data_verificacao >= d_ini,
+        Verificacao.data_verificacao <= d_fim,
+        Verificacao.origem == 'automatico',
+    ).count()
+    manuais = Verificacao.query.filter(
+        Verificacao.data_verificacao >= d_ini,
+        Verificacao.data_verificacao <= d_fim,
+        Verificacao.origem == 'manual',
+    ).count()
+
+    # Score de confiabilidade (0-100)
+    if total == 0:
+        score = 100
+    else:
+        penalidade_dupes = min(30, dupes * 10)
+        penalidade_sem_data = min(20, sem_data * 5)
+        score = max(0, 100 - penalidade_dupes - penalidade_sem_data)
+
+    return {
+        'total': total,
+        'sem_data': sem_data,
+        'duplicatas': dupes,
+        'automaticos': automaticos,
+        'manuais': manuais,
+        'score': score,
+        'score_label': 'Excelente' if score >= 90 else 'Bom' if score >= 70 else 'Regular' if score >= 50 else 'Crítico',
+    }
+

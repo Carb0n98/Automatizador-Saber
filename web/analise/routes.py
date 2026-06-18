@@ -3,7 +3,7 @@ from flask_login import login_required
 from datetime import date
 
 from . import analise_bp
-from .services import get_dados_mensais, get_meses_disponiveis, MESES_PT
+from .services import get_dados_mensais, get_meses_disponiveis, get_integridade_dados, MESES_PT
 from ..utils import require_perm
 
 
@@ -50,6 +50,24 @@ def api_mensal():
         mes = int(request.args.get('mes', hoje.month))
         
         dados = get_dados_mensais(ano, mes)
+        return jsonify({'status': 'ok', 'data': dados})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'status': 'erro', 'mensagem': str(e)}), 500
+
+
+@analise_bp.route('/api/integridade')
+@login_required
+@require_perm('ver_analise')
+def api_integridade():
+    """API que retorna métricas de integridade dos dados do mês."""
+    try:
+        hoje = date.today()
+        ano = int(request.args.get('ano', hoje.year))
+        mes = int(request.args.get('mes', hoje.month))
+        
+        dados = get_integridade_dados(ano, mes)
         return jsonify({'status': 'ok', 'data': dados})
     except Exception as e:
         import traceback

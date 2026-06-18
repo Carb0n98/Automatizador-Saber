@@ -1090,6 +1090,9 @@
             {% endif %}
           </div>
         </div>
+        <button onclick="document.getElementById('pwModal').classList.add('show')" class="logout-btn" title="Alterar Senha" style="margin-right:4px;">
+          <i class="bi bi-key"></i>
+        </button>
         <a href="{{ url_for('auth.logout') }}" class="logout-btn" title="Sair">
           <i class="bi bi-box-arrow-right"></i>
         </a>
@@ -1232,6 +1235,67 @@ document.addEventListener('touchend', e => {
   // Swipe left when sidebar open → close
   if (dx < -80 && dy < 60 && document.getElementById('sidebar').classList.contains('open')) closeSidebar();
 }, { passive: true });
+</script>
+
+<!-- Password Change Modal -->
+<div class="modal-overlay" id="pwModal">
+  <div class="modal-box" style="max-width:400px;">
+    <div class="modal-header">
+      <span class="modal-title"><i class="bi bi-key" style="color:var(--primary-l);margin-right:8px;"></i>Alterar Senha</span>
+      <button class="modal-close" onclick="document.getElementById('pwModal').classList.remove('show')">&times;</button>
+    </div>
+    <div class="form-group">
+      <label for="pwAtual">Senha Atual</label>
+      <input type="password" id="pwAtual" placeholder="Digite a senha atual">
+    </div>
+    <div class="form-group">
+      <label for="pwNova">Nova Senha</label>
+      <input type="password" id="pwNova" placeholder="Mínimo 6 caracteres">
+    </div>
+    <div class="form-group">
+      <label for="pwConfirmar">Confirmar Nova Senha</label>
+      <input type="password" id="pwConfirmar" placeholder="Repita a nova senha">
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:20px;">
+      <button class="btn btn-ghost" onclick="document.getElementById('pwModal').classList.remove('show')">Cancelar</button>
+      <button class="btn btn-primary" id="btnAlterarSenha" onclick="alterarSenha()">Alterar Senha</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function alterarSenha() {
+  const btn = document.getElementById('btnAlterarSenha');
+  const body = {
+    senha_atual: document.getElementById('pwAtual').value,
+    nova_senha: document.getElementById('pwNova').value,
+    confirmar_senha: document.getElementById('pwConfirmar').value,
+  };
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Salvando...';
+  fetch('/auth/alterar-senha', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body)
+  })
+  .then(r => r.json())
+  .then(d => {
+    if (d.status === 'ok') {
+      showToast(d.mensagem, 'success');
+      document.getElementById('pwModal').classList.remove('show');
+      document.getElementById('pwAtual').value = '';
+      document.getElementById('pwNova').value = '';
+      document.getElementById('pwConfirmar').value = '';
+    } else {
+      showToast(d.mensagem, 'error');
+    }
+  })
+  .catch(() => showToast('Erro na comunicação.', 'error'))
+  .finally(() => {
+    btn.disabled = false;
+    btn.innerHTML = 'Alterar Senha';
+  });
+}
 </script>
 
 {% block extra_js %}{% endblock %}

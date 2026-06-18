@@ -43,6 +43,15 @@ def init_scheduler(app):
 
     _scheduler.start()
     atexit.register(lambda: _scheduler.shutdown(wait=False))
+
+    # Log no sistema
+    with app.app_context():
+        try:
+            from .logger import log_info
+            log_info('Scheduler inicializado: coleta diária 07:00 + WhatsApp ativo.', origem='scheduler')
+        except Exception:
+            pass
+
     print('[SCHEDULER] Coleta diaria agendada para 07:00 (America/Sao_Paulo)')
     print('[SCHEDULER] Job WhatsApp ativo (avalia horario configurado a cada minuto)')
 
@@ -117,8 +126,9 @@ def _whatsapp_job(app):
             cfg.ultimo_envio  = datetime.now(timezone.utc)
             if result.get('ok'):
                 cfg.ultimo_status = 'enviado'
-                from .logger import log_info
+                from .logger import log_info, log_audit
                 log_info(f'Resumo WhatsApp enviado para {cfg.destinatario_nome}.', origem='whatsapp')
+                log_audit(f'WhatsApp: resumo enviado para {cfg.destinatario_nome}.', origem='whatsapp')
                 print(f'[WA] Resumo enviado para {cfg.destinatario_nome} as {hm}.')
             elif result.get('needs_reconnect'):
                 cfg.ultimo_status = 'sessao_expirada'

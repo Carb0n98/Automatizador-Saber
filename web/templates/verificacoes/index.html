@@ -2,133 +2,180 @@
 
 {% block title %}Verificações{% endblock %}
 {% block page_title %}Verificações{% endblock %}
-{% block page_subtitle %}Todas as verificações coletadas do sistema SABER{% endblock %}
+{% block page_subtitle %}Gestão de verificações do mês{% endblock %}
 
 {% block topbar_actions %}
-  <div style="font-size:12.5px;color:var(--text-m)" id="tableInfo">Carregando...</div>
+  <!-- Seletor de Mês -->
+  <select id="mesSeletor" class="btn btn-ghost" style="min-width:160px;cursor:pointer;">
+    {% for m in meses_disponiveis %}
+      <option value="{{ m.value }}" {% if m.value == mes_atual %}selected{% endif %}>
+        {{ m.label }}
+      </option>
+    {% endfor %}
+  </select>
 {% endblock %}
 
 {% block extra_css %}
-.filters-bar {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 20px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 16px 20px;
-}
+<style>
+  .filters-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 16px 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+  .search-input-wrap {
+    position: relative;
+    min-width: 220px;
+    flex: 1;
+  }
+  .search-input-wrap i {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-d);
+    font-size: 14px;
+  }
+  .search-input-wrap input {
+    padding-left: 36px !important;
+  }
+  .filter-select {
+    min-width: 140px;
+  }
 
-.filters-bar input, .filters-bar select {
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  font-family: 'Inter', sans-serif;
-  font-size: 13px;
-  padding: 8px 12px;
-  outline: none;
-  transition: border-color 0.15s;
-}
+  /* Summary bar */
+  .summary-bar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 16px;
+    font-size: 13px;
+  }
+  .summary-stat {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .summary-stat .num {
+    font-weight: 700;
+    font-size: 18px;
+  }
+  .summary-stat .lbl {
+    color: var(--text-m);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  .summary-divider {
+    width: 1px;
+    height: 28px;
+    background: var(--border);
+  }
 
-.filters-bar input:focus, .filters-bar select:focus {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 2px rgba(124,58,237,0.12);
-}
+  /* Status badges */
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 10px;
+    border-radius: 99px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .status-pill.apto { background: var(--success-bg); color: var(--success); }
+  .status-pill.parcialmente_apto { background: rgba(56,189,248,0.12); color: var(--info); }
+  .status-pill.pendente { background: var(--warning-bg); color: var(--warning); }
+  .status-pill.atrasado { background: var(--danger-bg); color: var(--danger); }
 
-.search-input-wrap { position: relative; flex: 1; min-width: 200px; }
-.search-input-wrap i { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--text-d); font-size: 14px; }
-.search-input-wrap input { width: 100%; padding-left: 34px; }
+  /* Row actions */
+  .row-actions {
+    display: flex;
+    gap: 4px;
+    opacity: 0.6;
+    transition: opacity 0.15s;
+  }
+  tbody tr:hover .row-actions { opacity: 1; }
 
-.tab-btns {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 16px;
-}
+  /* Pagination info */
+  .pagination-info {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 0;
+    font-size: 12px;
+    color: var(--text-m);
+  }
 
-.tab-btn {
-  padding: 7px 16px;
-  border-radius: 99px;
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--text-m);
-  font-family: 'Inter', sans-serif;
-  font-size: 12.5px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.tab-btn:hover { background: var(--surface-2); color: var(--text); border-color: var(--border-h); }
-
-.tab-btn.active {
-  background: rgba(124,58,237,0.15);
-  color: var(--primary-l);
-  border-color: rgba(124,58,237,0.3);
-}
-
-.loading-row td {
-  text-align: center;
-  padding: 40px !important;
-  color: var(--text-d);
-}
-
-.action-btns { display: flex; gap: 6px; }
-
-.nome-cell { font-weight: 600; }
-.cargo-cell { color: var(--text-m); font-size: 12.5px; }
+  /* Loading skeleton */
+  .skeleton-row {
+    animation: skeletonPulse 1.5s ease-in-out infinite;
+  }
+  @keyframes skeletonPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+</style>
 {% endblock %}
 
 {% block content %}
 
-<!-- Tabs -->
-<div class="tab-btns">
-  <button class="tab-btn active" id="tabTodos" onclick="setTab('')">
-    <i class="bi bi-list-ul"></i> Todos
-  </button>
-  <button class="tab-btn" id="tabPendentes" onclick="setTab('pendente')">
-    <i class="bi bi-hourglass-split"></i> Não Verificados
-  </button>
-  <button class="tab-btn" id="tabAtrasados" onclick="setTab('atrasado')"
-    style="--tab-danger:rgba(239,68,68,0.15)">
-    <i class="bi bi-exclamation-triangle"></i> Atrasados
-  </button>
-  <button class="tab-btn" id="tabVerificados" onclick="setTab('verificado')">
-    <i class="bi bi-check-circle"></i> Verificados
-  </button>
+<!-- Summary Bar -->
+<div class="summary-bar" id="summaryBar">
+  <div class="summary-stat">
+    <span class="num" id="sumTotal" style="color:var(--primary-l);">-</span>
+    <span class="lbl">Total</span>
+  </div>
+  <div class="summary-divider"></div>
+  <div class="summary-stat">
+    <span class="num" id="sumVerificados" style="color:var(--success);">-</span>
+    <span class="lbl">Verificados</span>
+  </div>
+  <div class="summary-divider"></div>
+  <div class="summary-stat">
+    <span class="num" id="sumPendentes" style="color:var(--warning);">-</span>
+    <span class="lbl">Pendentes</span>
+  </div>
 </div>
 
 <!-- Filters -->
 <div class="filters-bar">
   <div class="search-input-wrap">
     <i class="bi bi-search"></i>
-    <input type="text" id="searchNome" placeholder="Buscar por nome..." oninput="debounceLoad()"/>
+    <input type="text" id="searchInput" placeholder="Buscar por nome..." autocomplete="off">
   </div>
 
-  <select id="filterCargo" onchange="loadData()">
+  <select id="filterCargo" class="filter-select">
     <option value="">Todos os cargos</option>
     {% for c in cargos %}
-      <option value="{{ c }}">{{ c }}</option>
+    <option value="{{ c }}">{{ c }}</option>
     {% endfor %}
   </select>
 
-  <input type="date" id="filterDe" onchange="loadData()" title="Data de"/>
-  <input type="date" id="filterAte" onchange="loadData()" title="Data até"/>
+  <select id="filterStatus">
+    <option value="">Todos os status</option>
+    <option value="pendente">Pendente</option>
+    <option value="verificado">Verificado</option>
+    <option value="atrasado">Atrasado</option>
+  </select>
 
-  <button class="btn btn-ghost btn-sm" onclick="limparFiltros()">
-    <i class="bi bi-x-circle"></i> Limpar
+  <button class="btn btn-ghost btn-sm" onclick="limparFiltros()" title="Limpar filtros">
+    <i class="bi bi-x-lg"></i> Limpar
   </button>
 </div>
 
-<!-- Table Card -->
-<div class="card" style="padding:0">
+<!-- Table -->
+<div class="card" style="padding:0;overflow:hidden;">
   <div class="table-wrapper">
-    <table id="mainTable">
+    <table>
       <thead>
         <tr>
           <th>Nome</th>
@@ -137,262 +184,226 @@
           <th>Data</th>
           <th>Status</th>
           <th>Origem</th>
-          {% if can_manage %}<th>Ações</th>{% endif %}
+          {% if can_manage %}<th style="width:100px;">Ações</th>{% endif %}
         </tr>
       </thead>
       <tbody id="tableBody">
-        <tr class="loading-row">
-          <td colspan="{{ 7 if can_manage else 6 }}">
-            <span class="spinner" style="border-color:rgba(124,58,237,0.3);border-top-color:var(--primary)"></span>
-            <span style="margin-left:10px">Carregando...</span>
-          </td>
-        </tr>
+        <tr><td colspan="7" class="empty-state"><i class="bi bi-arrow-clockwise"></i><h3>Carregando...</h3></td></tr>
       </tbody>
     </table>
   </div>
-  <div class="pagination" id="paginationWrap"></div>
 </div>
 
-<!-- Confirm modal -->
-<div class="modal-overlay" id="confirmModal">
-  <div class="modal-box">
-    <div class="modal-header">
-      <span class="modal-title" id="modalTitle">Confirmar ação</span>
-      <button class="modal-close" onclick="closeModal()">&times;</button>
-    </div>
-    <p id="modalBody" style="color:var(--text-m);font-size:13.5px;margin-bottom:24px"></p>
-    <div style="display:flex;gap:10px;justify-content:flex-end">
-      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
-      <button class="btn btn-primary" id="modalConfirm">Confirmar</button>
-    </div>
-  </div>
+<!-- Pagination -->
+<div class="pagination-info">
+  <span id="pagInfo">-</span>
+  <div class="pagination" id="pagContainer"></div>
 </div>
+
 {% endblock %}
 
 {% block extra_js %}
 <script>
+const CAN_MANAGE = {{ 'true' if can_manage else 'false' }};
 let currentPage = 1;
-let currentStatus = '';
-let debounceTimer;
-let pendingAction = null;
+let perPage = 20;
+let debounceTimer = null;
 
-function debounceLoad() {
-  clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(loadData, 350);
-}
+// ─── Fetch data ───
+function fetchData(page = 1) {
+  currentPage = page;
+  const params = new URLSearchParams();
+  params.set('page', page);
+  params.set('per_page', perPage);
 
-function setTab(status) {
-  currentStatus = status;
-  currentPage = 1;
-  document.querySelectorAll('.tab-btn').forEach(b => {
-    b.classList.remove('active');
-    b.style.background = '';
-    b.style.color = '';
-    b.style.borderColor = '';
-  });
-  const map = {
-    '':           'tabTodos',
-    'pendente':   'tabPendentes',
-    'atrasado':   'tabAtrasados',
-    'verificado': 'tabVerificados'
-  };
-  const btn = document.getElementById(map[status]);
-  if (btn) {
-    btn.classList.add('active');
-    // Aba atrasados fica vermelha quando ativa
-    if (status === 'atrasado') {
-      btn.style.background = 'rgba(239,68,68,0.15)';
-      btn.style.color = '#fca5a5';
-      btn.style.borderColor = 'rgba(239,68,68,0.35)';
-    }
-  }
-  loadData();
-}
-
-function limparFiltros() {
-  document.getElementById('searchNome').value = '';
-  document.getElementById('filterCargo').value = '';
-  document.getElementById('filterDe').value = '';
-  document.getElementById('filterAte').value = '';
-  loadData();
-}
-
-async function loadData() {
-  const q = document.getElementById('searchNome').value;
+  const q = document.getElementById('searchInput').value.trim();
   const cargo = document.getElementById('filterCargo').value;
-  const de = document.getElementById('filterDe').value;
-  const ate = document.getElementById('filterAte').value;
+  const status = document.getElementById('filterStatus').value;
+  const mes = document.getElementById('mesSeletor').value;
 
-  const params = new URLSearchParams({
-    q, cargo, status: currentStatus,
-    data_de: de, data_ate: ate,
-    page: currentPage, per_page: 20
-  });
+  if (q) params.set('q', q);
+  if (cargo) params.set('cargo', cargo);
+  if (status) params.set('status', status);
+  if (mes) params.set('mes', mes);
 
-  document.getElementById('tableBody').innerHTML = `
-    <tr class="loading-row"><td colspan="7">
-      <span class="spinner" style="border-color:rgba(124,58,237,0.3);border-top-color:var(--primary)"></span>
-      <span style="margin-left:10px">Carregando...</span>
-    </td></tr>`;
+  const tbody = document.getElementById('tableBody');
+  tbody.innerHTML = '<tr class="skeleton-row"><td colspan="7" style="text-align:center;padding:40px;color:var(--text-d);"><span class="spinner"></span> Carregando...</td></tr>';
 
-  // Fix #13: try/catch para falha de rede
-  try {
-    const r = await fetch('/verificacoes/api?' + params);
-    if (!r.ok) throw new Error(`Erro ${r.status}`);
-    const data = await r.json();
-    document.getElementById('tableInfo').textContent = `${data.total} registro(s) encontrado(s)`;
-    renderTable(data.data);
-    renderPagination(data.page, data.pages, data.total);
-  } catch (e) {
-    document.getElementById('tableInfo').textContent = 'Erro ao carregar.';
-    document.getElementById('tableBody').innerHTML = `<tr><td colspan="7">
-      <div class="empty-state">
-        <i class="bi bi-wifi-off"></i>
-        <h3>Falha na conexão</h3>
-        <p>Não foi possível carregar os dados. Verifique se o servidor está ativo.</p>
-        <button class="btn btn-ghost" style="margin-top:12px" onclick="loadData()">
-          <i class="bi bi-arrow-clockwise"></i> Tentar novamente
-        </button>
-      </div>
-    </td></tr>`;
-  }
+  fetch('/verificacoes/api?' + params.toString())
+    .then(r => r.json())
+    .then(data => {
+      renderTable(data);
+      renderPagination(data);
+      renderSummary(data);
+    })
+    .catch(() => {
+      tbody.innerHTML = '<tr><td colspan="7" class="empty-state"><i class="bi bi-exclamation-circle"></i><h3>Erro ao carregar dados</h3></td></tr>';
+    });
 }
 
-// Permissao injetada pelo servidor (Jinja2 -> JS)
-const CAN_MANAGE = {{ can_manage | tojson }};
-
-const statusBadge = {
-  'pendente':          '<span class="badge badge-warning"><i class="bi bi-hourglass-split"></i> Não verificado</span>',
-  'apto':              '<span class="badge badge-success"><i class="bi bi-check-circle"></i> Verificado</span>',
-  'parcialmente_apto': '<span class="badge badge-info"><i class="bi bi-check2"></i> Parcialmente Verificado</span>',
-};
-
-const origemBadge = {
-  'manual':    '<span class="badge badge-purple" style="font-size:10px">Manual</span>',
-  'automatico':'<span class="badge badge-info" style="font-size:10px"><i class="bi bi-robot"></i> Auto</span>',
-};
-
-function renderTable(rows) {
+// ─── Render Table ───
+function renderTable(data) {
   const tbody = document.getElementById('tableBody');
-  if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="${CAN_MANAGE ? 7 : 6}">
-      <div class="empty-state">
-        <i class="bi bi-inbox"></i>
-        <h3>Nenhum registro encontrado</h3>
-        <p>Tente ajustar os filtros ou realize uma nova busca.</p>
-      </div>
-    </td></tr>`;
+  if (!data.data || data.data.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-state"><i class="bi bi-clipboard-x"></i><h3>Nenhum registro encontrado</h3><p>Ajuste os filtros ou busque novos dados.</p></td></tr>';
     return;
   }
 
-  tbody.innerHTML = rows.map(v => `
-    <tr>
-      <td><span class="nome-cell">${escHtml(v.nome)}</span></td>
-      <td><span class="cargo-cell">${escHtml(v.cargo || '—')}</span></td>
-      <td style="max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escHtml(v.atividade || '')}">${escHtml(v.atividade || '—')}</td>
-      <td style="white-space:nowrap">${v.data_verificacao || '—'}</td>
-      <td>${statusBadge[v.status] || v.status}</td>
-      <td>${origemBadge[v.origem] || v.origem}</td>
-      ${CAN_MANAGE ? `<td>
-        <div class="action-btns">
-          ${(v.status !== 'apto' && v.status !== 'parcialmente_apto') ? `
-          <button class="btn btn-success btn-icon btn-sm" title="Marcar como Verificado"
-            onclick="confirmarAcao('verificado', ${v.id}, '${escHtml(v.nome)}')">
-            <i class="bi bi-check-lg"></i>
-          </button>` : ''}
-          <button class="btn btn-danger btn-icon btn-sm" title="Excluir"
-            onclick="confirmarAcao('excluir', ${v.id}, '${escHtml(v.nome)}')">
-            <i class="bi bi-trash3"></i>
-          </button>
-        </div>
-      </td>` : ''}
-    </tr>`).join('');
-}
+  const hoje = new Date();
+  hoje.setHours(0,0,0,0);
 
-function renderPagination(page, pages, total) {
-  const wrap = document.getElementById('paginationWrap');
-  if (pages <= 1) { wrap.innerHTML = ''; return; }
-
-  let html = `<button class="page-btn" onclick="goPage(${page-1})" ${page<=1?'disabled':''}>
-    <i class="bi bi-chevron-left"></i></button>`;
-
-  for (let i = Math.max(1, page-2); i <= Math.min(pages, page+2); i++) {
-    html += `<button class="page-btn ${i===page?'active':''}" onclick="goPage(${i})">${i}</button>`;
-  }
-
-  html += `<button class="page-btn" onclick="goPage(${page+1})" ${page>=pages?'disabled':''}>
-    <i class="bi bi-chevron-right"></i></button>`;
-
-  wrap.innerHTML = html;
-}
-
-function goPage(p) {
-  currentPage = p;
-  loadData();
-}
-
-function confirmarAcao(tipo, id, nome) {
-  pendingAction = {tipo, id};
-  const modal = document.getElementById('confirmModal');
-  const btn = document.getElementById('modalConfirm');
-
-  if (tipo === 'verificado') {
-    document.getElementById('modalTitle').textContent = 'Marcar como Verificado';
-    document.getElementById('modalBody').textContent = `Deseja marcar "${nome}" como VERIFICADO?`;
-    btn.className = 'btn btn-success';
-    btn.textContent = 'Marcar como Verificado';
-  } else {
-    document.getElementById('modalTitle').textContent = 'Excluir Registro';
-    document.getElementById('modalBody').textContent = `Tem certeza que deseja excluir "${nome}"? Esta ação não pode ser desfeita.`;
-    btn.className = 'btn btn-danger';
-    btn.textContent = 'Excluir';
-  }
-
-  btn.onclick = executarAcao;
-  modal.classList.add('show');
-}
-
-function closeModal() {
-  document.getElementById('confirmModal').classList.remove('show');
-  pendingAction = null;
-}
-
-async function executarAcao() {
-  if (!pendingAction) return;
-  const {tipo, id} = pendingAction;
-  closeModal();
-
-  const url = tipo === 'verificado'
-    ? `/verificacoes/${id}/marcar-verificado`
-    : `/verificacoes/${id}/excluir`;
-
-  // Fix #12: verificar r.ok antes de processar resposta
-  try {
-    const r = await fetch(url, {method: 'POST'});
-    const data = await r.json();
-    if (r.ok) {
-      showToast(data.mensagem, 'success');
-    } else {
-      showToast(data.mensagem || data.error || 'Erro ao executar ação.', 'error');
+  tbody.innerHTML = data.data.map(v => {
+    // Determine if overdue
+    let statusClass = v.status;
+    let statusLabel = v.status_display || v.status;
+    if (v.status === 'pendente' && v.data_verificacao) {
+      const parts = v.data_verificacao.split('/');
+      const dv = new Date(parts[2], parts[1]-1, parts[0]);
+      if (dv < hoje) {
+        statusClass = 'atrasado';
+        statusLabel = 'Atrasado';
+      }
     }
-    loadData();
-  } catch (e) {
-    showToast('Erro de conexão: ' + e.message, 'error');
+
+    let actions = '';
+    if (CAN_MANAGE) {
+      actions = `<td>
+        <div class="row-actions">
+          ${v.status !== 'apto' ? `<button class="btn btn-success btn-sm btn-icon" onclick="marcarApto(${v.id})" title="Marcar como Verificado"><i class="bi bi-check-lg"></i></button>` : ''}
+          <button class="btn btn-ghost btn-sm btn-icon" onclick="excluir(${v.id})" title="Excluir"><i class="bi bi-trash"></i></button>
+        </div>
+      </td>`;
+    }
+
+    return `<tr>
+      <td><strong>${esc(v.nome)}</strong></td>
+      <td>${esc(v.cargo || '-')}</td>
+      <td>${esc(v.atividade || '-')}</td>
+      <td style="white-space:nowrap;">${esc(v.data_verificacao)}</td>
+      <td><span class="status-pill ${statusClass}">${statusLabel}</span></td>
+      <td><span class="badge ${v.origem === 'automatico' ? 'badge-info' : 'badge-purple'}">${v.origem}</span></td>
+      ${actions}
+    </tr>`;
+  }).join('');
+}
+
+// ─── Render Summary ───
+function renderSummary(data) {
+  document.getElementById('sumTotal').textContent = data.total || 0;
+  document.getElementById('sumVerificados').textContent = data.total_verificados || 0;
+  document.getElementById('sumPendentes').textContent = (data.total || 0) - (data.total_verificados || 0);
+}
+
+// ─── Render Pagination ───
+function renderPagination(data) {
+  const info = document.getElementById('pagInfo');
+  const container = document.getElementById('pagContainer');
+
+  const start = (data.page - 1) * data.per_page + 1;
+  const end = Math.min(data.page * data.per_page, data.total);
+  info.textContent = data.total > 0 ? `Mostrando ${start}–${end} de ${data.total}` : 'Nenhum registro';
+
+  container.innerHTML = '';
+  if (data.pages <= 1) return;
+
+  // Previous
+  const prev = document.createElement('button');
+  prev.className = 'page-btn';
+  prev.innerHTML = '<i class="bi bi-chevron-left"></i>';
+  prev.disabled = data.page <= 1;
+  prev.onclick = () => fetchData(data.page - 1);
+  container.appendChild(prev);
+
+  // Pages
+  const maxVisible = 5;
+  let startPage = Math.max(1, data.page - Math.floor(maxVisible/2));
+  let endPage = Math.min(data.pages, startPage + maxVisible - 1);
+  if (endPage - startPage + 1 < maxVisible) startPage = Math.max(1, endPage - maxVisible + 1);
+
+  if (startPage > 1) {
+    addPageBtn(container, 1, data.page);
+    if (startPage > 2) container.innerHTML += '<span style="color:var(--text-d);padding:0 4px;">...</span>';
   }
+
+  for (let i = startPage; i <= endPage; i++) {
+    addPageBtn(container, i, data.page);
+  }
+
+  if (endPage < data.pages) {
+    if (endPage < data.pages - 1) container.innerHTML += '<span style="color:var(--text-d);padding:0 4px;">...</span>';
+    addPageBtn(container, data.pages, data.page);
+  }
+
+  // Next
+  const next = document.createElement('button');
+  next.className = 'page-btn';
+  next.innerHTML = '<i class="bi bi-chevron-right"></i>';
+  next.disabled = data.page >= data.pages;
+  next.onclick = () => fetchData(data.page + 1);
+  container.appendChild(next);
 }
 
-function escHtml(str) {
-  if (!str) return '';
-  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+function addPageBtn(container, pageNum, current) {
+  const btn = document.createElement('button');
+  btn.className = 'page-btn' + (pageNum === current ? ' active' : '');
+  btn.textContent = pageNum;
+  btn.onclick = () => fetchData(pageNum);
+  container.appendChild(btn);
 }
 
-// Close modal on overlay click
-document.getElementById('confirmModal').addEventListener('click', function(e) {
-  if (e.target === this) closeModal();
+// ─── Actions ───
+function marcarApto(id) {
+  fetch(`/verificacoes/${id}/marcar-verificado`, { method: 'POST' })
+    .then(r => r.json())
+    .then(d => {
+      showToast(d.mensagem, d.status === 'ok' ? 'success' : 'error');
+      if (d.status === 'ok') fetchData(currentPage);
+    })
+    .catch(() => showToast('Falha na comunicação.', 'error'));
+}
+
+function excluir(id) {
+  if (!confirm('Excluir este registro?')) return;
+  fetch(`/verificacoes/${id}/excluir`, { method: 'POST' })
+    .then(r => r.json())
+    .then(d => {
+      showToast(d.mensagem, d.status === 'ok' ? 'success' : 'error');
+      if (d.status === 'ok') fetchData(currentPage);
+    })
+    .catch(() => showToast('Falha na comunicação.', 'error'));
+}
+
+function limparFiltros() {
+  document.getElementById('searchInput').value = '';
+  document.getElementById('filterCargo').value = '';
+  document.getElementById('filterStatus').value = '';
+  fetchData(1);
+}
+
+function esc(text) {
+  const d = document.createElement('div');
+  d.textContent = text || '';
+  return d.innerHTML;
+}
+
+// ─── Event Listeners (with debounce) ───
+document.getElementById('searchInput').addEventListener('input', () => {
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(() => fetchData(1), 350);
 });
+document.getElementById('filterCargo').addEventListener('change', () => fetchData(1));
+document.getElementById('filterStatus').addEventListener('change', () => fetchData(1));
+document.getElementById('mesSeletor').addEventListener('change', () => fetchData(1));
 
-// On load: check URL ?tab= param (e.g. from dashboard shortcut)
-const urlTab = new URLSearchParams(window.location.search).get('tab') || '';
-setTab(urlTab);
+// Initial load
+document.addEventListener('DOMContentLoaded', () => {
+  // Check URL params for initial status filter
+  const urlParams = new URLSearchParams(window.location.search);
+  const statusParam = urlParams.get('status');
+  if (statusParam) {
+    document.getElementById('filterStatus').value = statusParam;
+  }
+  fetchData(1);
+});
 </script>
 {% endblock %}

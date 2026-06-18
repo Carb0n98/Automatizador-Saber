@@ -1,4 +1,5 @@
 import os
+from datetime import timedelta
 from flask import Flask
 from .extensions import db, login_manager, bcrypt
 
@@ -9,10 +10,21 @@ def create_app():
 
     # Config
     secret_key = os.environ.get('SECRET_KEY', '').strip()
-    # Se SECRET_KEY vier vazio, usa fallback de dev (nunca exposta em produção)
-    app.config['SECRET_KEY'] = secret_key if secret_key else 'dev-fallback-altere-em-producao'
+    if not secret_key or secret_key == 'dev-fallback-altere-em-producao':
+        import secrets
+        secret_key = secrets.token_hex(32)
+        print('[SECURITY] SECRET_KEY gerada automaticamente. Defina SECRET_KEY no .env para produção.')
+    app.config['SECRET_KEY'] = secret_key
 
-    # Database: prioriza env var, senão usa /app/instance/ (funciona local e Docker)
+    # Session security
+    app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=12)
+    app.config['SESSION_COOKIE_HTTPONLY'] = True
+    app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+    # SESSION_COOKIE_SECURE = True em produção (HTTPS)
+    if os.environ.get('FLASK_ENV') == 'production':
+        app.config['SESSION_COOKIE_SECURE'] = True
+
+    # Database: prioriza env var, senão usa /app/instance/
     instance_dir = os.path.join(base_dir, 'instance')
     os.makedirs(instance_dir, exist_ok=True)
     default_db = f'sqlite:///{os.path.join(instance_dir, "verificacoes.db")}'
@@ -26,6 +38,7 @@ def create_app():
     login_manager.login_view = 'auth.login'
     login_manager.login_message = 'Faça login para acessar o painel.'
     login_manager.login_message_category = 'warning'
+    login_manager.session_protection = 'strong'
 
     @login_manager.user_loader
     def load_user(user_id):
@@ -59,6 +72,7 @@ def create_app():
         from .utils import migrate_user_columns
         migrate_user_columns(db)
         _create_indices(db)
+        _migrate_dedup(db)
         _seed_admin()
         _seed_default_config()
 
@@ -69,7 +83,6 @@ def create_app():
         from flask import request as req
 
         # Erros HTTP (4xx, 5xx do Werkzeug) — deixa o Flask renderizar normalmente
-        # SEM re-raise, pois isso causaria traceback desnecessário nos logs
         if isinstance(e, HTTPException):
             return e
 
@@ -120,6 +133,7 @@ def _seed_default_config():
         'saber_senha': '',
         'restaurante': 'NPN',
         'telefone': '',
+        'timezone': 'America/Sao_Paulo',
     }
     changed = False
     for chave, valor in defaults.items():
@@ -131,11 +145,73 @@ def _seed_default_config():
 
 
 def _create_indices(db):
+    """Cria índices otimizados para queries mensais e de status."""
     try:
         from sqlalchemy import text
         with db.engine.connect() as conn:
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_verif_data_status ON verificacoes (data_verificacao, status)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_verif_status ON verificacoes (status)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_verif_nome_data_ativ ON verificacoes (nome, data_verificacao, atividade)"))
             conn.commit()
     except Exception as e:
         print(f"[MIGRATE] Aviso ao criar índice: {e}")
+
+
+def _migrate_dedup(db):
+    """
+    Migração automática:
+    1. Remove duplicatas existentes no banco (mantém o registro com menor ID)
+    2. Cria constraint UNIQUE se não existir
+    3. Adiciona novos campos de segurança ao User
+    """
+    from sqlalchemy import text
+    try:
+        with db.engine.connect() as conn:
+            # ─── Limpar duplicatas existentes ─────────────────────────────
+            # Encontra IDs duplicados (mantém o menor ID de cada grupo)
+            dupes = conn.execute(text("""
+                SELECT id FROM verificacoes
+                WHERE id NOT IN (
+                    SELECT MIN(id)
+                    FROM verificacoes
+                    GROUP BY nome, data_verificacao, COALESCE(atividade, '')
+                )
+            """)).fetchall()
+
+            if dupes:
+                ids_to_delete = [row[0] for row in dupes]
+                # SQLite não suporta DELETE com IN de muitos valores facilmente,
+                # então deletamos em lotes
+                for i in range(0, len(ids_to_delete), 50):
+                    batch = ids_to_delete[i:i+50]
+                    placeholders = ','.join(str(x) for x in batch)
+                    conn.execute(text(f"DELETE FROM verificacoes WHERE id IN ({placeholders})"))
+                conn.commit()
+                print(f'[MIGRATE] {len(ids_to_delete)} registro(s) duplicado(s) removido(s).')
+
+            # ─── Criar UNIQUE INDEX ───────────────────────────────────────
+            try:
+                conn.execute(text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_verif_nome_data_ativ "
+                    "ON verificacoes (nome, data_verificacao, COALESCE(atividade, ''))"
+                ))
+                conn.commit()
+            except Exception:
+                pass  # Já existe
+
+            # ─── Migrar campos de segurança do User ──────────────────────
+            new_cols = [
+                ("ultimo_login",     "DATETIME"),
+                ("tentativas_login", "INTEGER DEFAULT 0 NOT NULL"),
+                ("bloqueado_ate",    "DATETIME"),
+            ]
+            for col_name, col_def in new_cols:
+                try:
+                    conn.execute(text(f"ALTER TABLE users ADD COLUMN {col_name} {col_def}"))
+                    conn.commit()
+                    print(f'[MIGRATE] Coluna adicionada: users.{col_name}')
+                except Exception:
+                    pass  # Coluna já existe
+
+    except Exception as e:
+        print(f'[MIGRATE] Aviso na migração de dedup: {e}')

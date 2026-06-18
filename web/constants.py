@@ -14,6 +14,13 @@ SABER_STATUS_MAP = {
     'PARCIALMENTE APTO': 'parcialmente_apto',
 }
 
+# Mapeamento para exibição amigável em PT-BR
+STATUS_DISPLAY = {
+    'pendente': 'Pendente',
+    'apto': 'Apto',
+    'parcialmente_apto': 'Parcialmente Apto',
+}
+
 
 def is_verificado(status: str) -> bool:
     """Retorna True se o status é considerado 'Verificado'."""

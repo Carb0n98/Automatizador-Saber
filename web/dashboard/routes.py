@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, jsonify
+from flask import Blueprint, render_template, jsonify, request
 from flask_login import login_required, current_user
 import threading
 from ..utils import require_perm, hoje_local, now_local
@@ -13,17 +13,29 @@ def index():
     from ..extensions import db
     from ..constants import VERIFICADO_STATUSES
     import calendar
+    from datetime import date
 
     hoje = hoje_local()
     agora = now_local()
     tz_nome = Config.get('timezone', 'America/Sao_Paulo')
 
-    # Limites do mês atual (BETWEEN otimizado para índice ix_verif_data_status)
-    from datetime import date
-    primeiro_dia = date(hoje.year, hoje.month, 1)
-    ultimo_dia = date(hoje.year, hoje.month, calendar.monthrange(hoje.year, hoje.month)[1])
+    # Suporte a filtro mensal via query param
+    mes_param = request.args.get('mes', '').strip()
+    if mes_param:
+        try:
+            parts = mes_param.split('-')
+            ano_sel = int(parts[0])
+            mes_sel = int(parts[1])
+        except (ValueError, IndexError):
+            ano_sel, mes_sel = hoje.year, hoje.month
+    else:
+        ano_sel, mes_sel = hoje.year, hoje.month
 
-    # Total de registros no mês atual (por data_verificacao)
+    # Limites do mês selecionado
+    primeiro_dia = date(ano_sel, mes_sel, 1)
+    ultimo_dia = date(ano_sel, mes_sel, calendar.monthrange(ano_sel, mes_sel)[1])
+
+    # Total de registros no mês
     total_mes = Verificacao.query.filter(
         Verificacao.data_verificacao >= primeiro_dia,
         Verificacao.data_verificacao <= ultimo_dia,
@@ -44,21 +56,21 @@ def index():
         Verificacao.status == 'pendente'
     ).count()
 
-    # Não verificados no mês atual
+    # Não verificados no mês
     nao_verificados = Verificacao.query.filter(
         Verificacao.status == 'pendente',
         Verificacao.data_verificacao >= primeiro_dia,
         Verificacao.data_verificacao <= ultimo_dia,
     ).count()
 
-    # Verificados no mês atual (total)
+    # Verificados no mês
     verificados = Verificacao.query.filter(
         Verificacao.status.in_(VERIFICADO_STATUSES),
         Verificacao.data_verificacao >= primeiro_dia,
         Verificacao.data_verificacao <= ultimo_dia,
     ).count()
 
-    # Atrasados: pendentes com data anterior a hoje (dentro do mês atual)
+    # Atrasados: pendentes com data anterior a hoje (dentro do mês)
     atrasados = Verificacao.query.filter(
         Verificacao.status == 'pendente',
         Verificacao.data_verificacao >= primeiro_dia,
@@ -75,8 +87,53 @@ def index():
     next_run = get_next_run()
     scheduler_status = get_scheduler_status()
 
-    # Offset UTC em horas (ex: -3 para America/Sao_Paulo)
+    # Offset UTC
     tz_offset = int(agora.utcoffset().total_seconds() // 3600) if agora.utcoffset() else -3
+
+    # Meses disponíveis para seletor
+    from ..analise.services import get_meses_disponiveis, MESES_PT
+    meses_disponiveis = get_meses_disponiveis()
+    atual_str = f"{ano_sel}-{mes_sel:02d}"
+    if not any(m['value'] == atual_str for m in meses_disponiveis):
+        meses_disponiveis.insert(0, {
+            'ano': ano_sel,
+            'mes': mes_sel,
+            'label': f'{MESES_PT[mes_sel]} {ano_sel}',
+            'value': atual_str
+        })
+
+    # Sparkline: verificações por dia nos últimos 7 dias úteis do mês
+    from sqlalchemy import func, case
+    from datetime import timedelta
+    sparkline_data = []
+    for i in range(6, -1, -1):
+        dia = hoje - timedelta(days=i)
+        if dia < primeiro_dia or dia > ultimo_dia:
+            sparkline_data.append({'dia': dia.strftime('%d'), 'total': 0, 'verificados': 0})
+            continue
+        row = db.session.query(
+            func.count(Verificacao.id).label('total'),
+            func.sum(case((Verificacao.status.in_(VERIFICADO_STATUSES), 1), else_=0)).label('verificados'),
+        ).filter(
+            Verificacao.data_verificacao == dia,
+        ).first()
+        sparkline_data.append({
+            'dia': dia.strftime('%d'),
+            'total': row.total or 0,
+            'verificados': int(row.verificados or 0),
+        })
+
+    # Saúde do sistema
+    from ..models import AppLog
+    from datetime import timezone as tz_module
+    desde_24h = agora.astimezone(tz_module.utc).replace(tzinfo=None) - timedelta(hours=24)
+    # Approximate UTC conversion for the query
+    from datetime import datetime as dt_cls
+    utc_24h = dt_cls.now(tz_module.utc) - timedelta(hours=24)
+    erros_recentes = AppLog.query.filter(
+        AppLog.criado_em >= utc_24h,
+        AppLog.nivel == 'ERROR'
+    ).count()
 
     return render_template('dashboard/index.html',
         active='dashboard',
@@ -95,6 +152,10 @@ def index():
         data_hoje=hoje.strftime('%d/%m/%Y'),
         hora_atual=agora.strftime('%H:%M'),
         tz_offset=tz_offset,
+        meses_disponiveis=meses_disponiveis,
+        mes_selecionado=atual_str,
+        sparkline_data=sparkline_data,
+        erros_recentes=erros_recentes,
     )
 
 
@@ -105,11 +166,13 @@ def index():
 def buscar_manual():
     from ..tasks import executar_coleta, is_running
     from flask import current_app
+    from ..logger import log_audit
 
     if is_running():
         return jsonify({'status': 'ocupado', 'mensagem': 'Uma coleta já está em andamento. Aguarde.'})
 
     app = current_app._get_current_object()
+    log_audit('Coleta manual iniciada.', origem='dashboard')
 
     def run():
         executar_coleta(app, 'manual')

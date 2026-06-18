@@ -2,388 +2,477 @@
 
 {% block title %}Dashboard{% endblock %}
 {% block page_title %}Dashboard{% endblock %}
-{% block page_subtitle %}Visão geral do sistema em tempo real{% endblock %}
+{% block page_subtitle %}Visão geral das verificações · {{ data_hoje }}{% endblock %}
 
 {% block topbar_actions %}
+  <!-- Seletor de Mês -->
+  <select id="mesSeletor" class="btn btn-ghost" style="min-width:160px;cursor:pointer;" onchange="mudarMes(this.value)">
+    {% for m in meses_disponiveis %}
+      <option value="{{ m.value }}" {% if m.value == mes_selecionado %}selected{% endif %}>
+        {{ m.label }}
+      </option>
+    {% endfor %}
+  </select>
+
   {% if current_user.has_perm('efetuar_busca') %}
-  <button class="btn btn-primary" id="btnBuscar" onclick="iniciarBusca()">
-    <i class="bi bi-search"></i> Buscar Agora
+  <button class="btn btn-primary" id="btnBuscar" onclick="buscarDados()">
+    <i class="bi bi-cloud-download"></i>
+    <span>Buscar SABER</span>
   </button>
   {% endif %}
 {% endblock %}
 
 {% block extra_css %}
-.log-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--border);
-}
-.log-item:last-child { border-bottom: none; }
+<style>
+  .sparkline-container {
+    display: flex;
+    align-items: flex-end;
+    gap: 3px;
+    height: 40px;
+    padding: 4px 0;
+  }
+  .sparkline-bar {
+    flex: 1;
+    min-width: 8px;
+    border-radius: 3px 3px 0 0;
+    transition: height 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+    position: relative;
+    cursor: pointer;
+  }
+  .sparkline-bar:hover { opacity: 0.85; }
+  .sparkline-bar .spark-tip {
+    display: none;
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--surface-3);
+    border: 1px solid var(--border-h);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 10px;
+    white-space: nowrap;
+    z-index: 10;
+    color: var(--text);
+  }
+  .sparkline-bar:hover .spark-tip { display: block; }
+  .sparkline-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 9px;
+    color: var(--text-d);
+    padding-top: 4px;
+  }
 
-.log-dot {
-  width: 8px; height: 8px;
-  border-radius: 50%;
-  margin-top: 6px;
-  flex-shrink: 0;
-}
-.log-dot.sucesso { background: var(--success); box-shadow: 0 0 6px var(--success); }
-.log-dot.erro    { background: var(--danger);  box-shadow: 0 0 6px var(--danger); }
-.log-dot.executando { background: var(--warning); animation: pulse 1.5s infinite; }
+  /* Counter animation */
+  .stat-value { transition: color 0.3s; }
 
-.log-body { flex: 1; min-width: 0; }
-.log-msg  { font-size: 13px; color: var(--text); line-height: 1.5; }
-.log-meta { font-size: 11.5px; color: var(--text-d); margin-top: 3px; }
+  /* Progress ring */
+  .progress-ring {
+    width: 80px;
+    height: 80px;
+    margin: 0 auto;
+  }
+  .progress-ring circle {
+    fill: none;
+    stroke-width: 6;
+    stroke-linecap: round;
+    transform: rotate(-90deg);
+    transform-origin: center;
+  }
+  .progress-ring .bg { stroke: var(--surface-3); }
+  .progress-ring .fg {
+    stroke: var(--primary-l);
+    transition: stroke-dashoffset 1.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .progress-text {
+    font-size: 20px;
+    font-weight: 800;
+    fill: var(--text);
+  }
+  .progress-sub {
+    font-size: 9px;
+    fill: var(--text-m);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
 
-.scheduler-card {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  background: linear-gradient(135deg, rgba(124,58,237,0.1), rgba(79,70,229,0.1));
-  border: 1px solid rgba(124,58,237,0.2);
-  border-radius: var(--radius);
-  padding: 20px 24px;
-  margin-bottom: 24px;
-}
+  /* Health badge */
+  .health-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 99px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .health-badge.healthy { background: var(--success-bg); color: var(--success); }
+  .health-badge.warning { background: var(--warning-bg); color: var(--warning); }
+  .health-badge.error   { background: var(--danger-bg); color: var(--danger); }
 
-.sch-icon {
-  width: 48px; height: 48px;
-  background: rgba(124,58,237,0.15);
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 22px;
-  color: var(--primary-l);
-  flex-shrink: 0;
-}
+  .log-list { list-style: none; padding: 0; }
+  .log-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 12.5px;
+  }
+  .log-item:last-child { border-bottom: none; }
+  .log-time { color: var(--text-d); font-size: 11px; white-space: nowrap; }
 
-.sch-info { flex: 1; }
-.sch-title { font-size: 14px; font-weight: 600; color: var(--text); }
-.sch-sub   { font-size: 12.5px; color: var(--text-m); margin-top: 3px; }
-
-.progress-bar-wrap {
-  height: 4px;
-  background: var(--surface-2);
-  border-radius: 99px;
-  overflow: hidden;
-  margin-top: 20px;
-  display: none;
-}
-.progress-bar-fill {
-  height: 100%;
-  background: linear-gradient(90deg, var(--primary), var(--accent));
-  border-radius: 99px;
-  animation: progress-anim 2s ease-in-out infinite;
-}
-@keyframes progress-anim { 0%{width:10%} 50%{width:80%} 100%{width:10%} }
+  .sch-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-top: 12px;
+  }
+  .sch-item {
+    background: var(--surface-2);
+    border-radius: var(--radius-sm);
+    padding: 12px;
+  }
+  .sch-label {
+    font-size: 10px;
+    color: var(--text-d);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+  }
+  .sch-value { font-size: 14px; font-weight: 600; }
+</style>
 {% endblock %}
 
 {% block content %}
-<!-- Scheduler status banner -->
-<div class="scheduler-card">
-  <div class="sch-icon"><i class="bi bi-clock-history"></i></div>
-  <div class="sch-info">
-    <div class="sch-title">
-      <span class="status-dot {{ 'green' if scheduler_status == 'ativa' else 'red' }}"></span>
-      Automação {{ scheduler_status | title }}
-    </div>
-    <div class="sch-sub">
-      Próxima execução: <strong>{{ next_run }}</strong>
-      &nbsp;|&nbsp; Executa às <strong>07:00</strong>
-      &nbsp;|&nbsp;
-      <i class="bi bi-globe2" style="color:var(--primary-l)"></i>
-      <strong>{{ tz_nome }}</strong>
-    </div>
-  </div>
-  <div style="text-align:right;flex-shrink:0">
-    <div style="font-size:22px;font-weight:700;color:var(--text);letter-spacing:1px;font-variant-numeric:tabular-nums" id="relogioHora">{{ hora_atual }}</div>
-    <div style="font-size:12px;color:var(--text-m);margin-top:2px">{{ data_hoje }}</div>
-  </div>
-</div>
-
-<!-- Progress bar (hidden, shown during scraping) -->
-<div class="progress-bar-wrap" id="progressBar">
-  <div class="progress-bar-fill"></div>
-</div>
-
-<!-- Meta Mensal -->
-<div class="card mb-20" style="padding:16px 24px; display:flex; flex-direction:column; gap:8px;">
-  <div style="display:flex; justify-content:space-between; align-items:flex-end;">
-    <div style="font-size:13.5px; font-weight:600; color:var(--text); display:flex; align-items:center; gap:8px">
-      <i class="bi bi-bullseye" style="color:var(--primary-l)"></i> Meta do Mês
-    </div>
-    <div style="font-size:15px; font-weight:700; color:var(--text)">
-      {{ verificados_mes }} <span style="font-size:12px; font-weight:500; color:var(--text-m)">/ {{ total_mes }} executados</span>
-      <span style="font-size:12.5px; font-weight:700; color:var(--primary-l); margin-left:8px">({{ progresso_pct }}%)</span>
-    </div>
-  </div>
-  <div style="height:8px; background:var(--surface-2); border-radius:99px; overflow:hidden">
-    <div style="height:100%; width:{{ progresso_pct }}%; background:linear-gradient(90deg, var(--primary), var(--accent)); border-radius:99px; transition:width 0.8s ease-in-out"></div>
-  </div>
-</div>
-
-<!-- Stats -->
+<!-- Stats Grid -->
 <div class="stats-grid">
   <div class="stat-card purple">
     <div class="stat-top">
-      <div class="stat-label">Total no Mês</div>
-      <div class="stat-icon"><i class="bi bi-calendar-month"></i></div>
+      <span class="stat-label">Total no Mês</span>
+      <div class="stat-icon"><i class="bi bi-clipboard-data"></i></div>
     </div>
-    <div class="stat-value" id="statMes">{{ total_mes }}</div>
-    <div class="stat-footer">Verificações coletadas este mês</div>
+    <div class="stat-value" data-count="{{ total_mes }}">0</div>
+    <div class="stat-footer">Registros de verificação</div>
   </div>
 
   <div class="stat-card green">
     <div class="stat-top">
-      <div class="stat-label">Hoje</div>
-      <div class="stat-icon"><i class="bi bi-calendar-check"></i></div>
+      <span class="stat-label">Verificados</span>
+      <div class="stat-icon"><i class="bi bi-check-circle"></i></div>
     </div>
-    <div class="stat-value" id="statHoje">{{ nao_verificados_hoje }}</div>
-    <div class="stat-footer">Não verificados para hoje</div>
+    <div class="stat-value" data-count="{{ verificados }}">0</div>
+    <div class="stat-footer">{{ progresso_pct }}% concluído</div>
   </div>
 
   <div class="stat-card amber">
     <div class="stat-top">
-      <div class="stat-label">Não Verificados</div>
-      <div class="stat-icon"><i class="bi bi-hourglass-split"></i></div>
+      <span class="stat-label">Pendentes</span>
+      <div class="stat-icon"><i class="bi bi-clock"></i></div>
     </div>
-    <div class="stat-value" id="statPendentes">{{ nao_verificados }}</div>
-    <div class="stat-footer">Aguardando verificação</div>
+    <div class="stat-value" data-count="{{ nao_verificados }}">0</div>
+    <div class="stat-footer">{{ nao_verificados_hoje }} vencem hoje</div>
   </div>
 
-  <div class="stat-card red" style="cursor:pointer" onclick="window.location='{{ url_for('verificacoes.index') }}?tab=atrasado'" title="Ver atrasados">
+  <div class="stat-card red">
     <div class="stat-top">
-      <div class="stat-label">Atrasados</div>
+      <span class="stat-label">Atrasados</span>
       <div class="stat-icon"><i class="bi bi-exclamation-triangle"></i></div>
     </div>
-    <div class="stat-value" id="statAtrasados">{{ atrasados }}</div>
-    <div class="stat-footer">Pendentes com prazo vencido</div>
-  </div>
-
-  <div class="stat-card green" style="--border-top-color:#10b981">
-    <div class="stat-top">
-      <div class="stat-label">Verificados</div>
-      <div class="stat-icon"><i class="bi bi-patch-check"></i></div>
-    </div>
-    <div class="stat-value" id="statVerificados">{{ verificados }}</div>
-    <div class="stat-footer">Verificações concluídas</div>
+    <div class="stat-value" data-count="{{ atrasados }}">0</div>
+    <div class="stat-footer">Requerem ação imediata</div>
   </div>
 </div>
 
-<!-- Bottom grid -->
-<div style="display:grid;grid-template-columns:1fr 380px;gap:20px;align-items:start">
+<!-- Main Grid -->
+<div style="display:grid;grid-template-columns:1fr 380px;gap:20px;">
+  <!-- Left Column -->
+  <div style="display:flex;flex-direction:column;gap:20px;">
 
-  <!-- Log history -->
-  <div class="card">
-    <div class="card-header">
-      <div class="card-title"><i class="bi bi-terminal" style="color:var(--primary-l);margin-right:8px"></i>Histórico de Execuções</div>
-      <button class="btn btn-ghost btn-sm" onclick="refreshStatus()">
-        <i class="bi bi-arrow-clockwise"></i> Atualizar
-      </button>
+    <!-- Progress + Sparkline Card -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title"><i class="bi bi-graph-up" style="color:var(--primary-l);margin-right:6px;"></i> Progresso do Mês</span>
+        <span class="badge badge-purple" id="progPct">{{ progresso_pct }}%</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:24px;">
+        <!-- Progress Ring -->
+        <svg class="progress-ring" viewBox="0 0 80 80">
+          <circle class="bg" cx="40" cy="40" r="34"/>
+          <circle class="fg" id="progressArc" cx="40" cy="40" r="34"
+                  stroke-dasharray="213.6"
+                  stroke-dashoffset="213.6"/>
+          <text class="progress-text" x="40" y="43" text-anchor="middle" id="progressText">0%</text>
+          <text class="progress-sub" x="40" y="54" text-anchor="middle">completo</text>
+        </svg>
+
+        <!-- Sparkline -->
+        <div style="flex:1;">
+          <div style="font-size:11px;color:var(--text-m);margin-bottom:6px;">Últimos 7 dias</div>
+          <div class="sparkline-container" id="sparkline"></div>
+          <div class="sparkline-labels" id="sparkLabels"></div>
+        </div>
+      </div>
     </div>
 
-    <div id="logsList">
-      {% if ultimos_logs %}
-        {% for log in ultimos_logs %}
-        <div class="log-item">
-          <div class="log-dot {{ log.status }}"></div>
-          <div class="log-body">
-            <div class="log-msg">{{ log.mensagem or '—' }}</div>
-            <div class="log-meta">
-              {{ log.executado_em.strftime('%d/%m/%Y às %H:%M') if log.executado_em }}
-              &nbsp;|&nbsp;
-              <span class="badge badge-{{ 'success' if log.status == 'sucesso' else ('warning' if log.status == 'executando' else 'danger') }}">
-                {{ log.status | upper }}
-              </span>
-              {% if log.total_coletados %}
-                &nbsp;|&nbsp; {{ log.total_coletados }} processados
-              {% endif %}
-            </div>
+    <!-- System Health Card -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title"><i class="bi bi-heart-pulse" style="color:var(--success);margin-right:6px;"></i> Saúde do Sistema</span>
+        {% if erros_recentes == 0 %}
+          <span class="health-badge healthy"><span class="status-dot green"></span> Operacional</span>
+        {% elif erros_recentes <= 3 %}
+          <span class="health-badge warning"><span class="status-dot amber"></span> {{ erros_recentes }} alerta(s)</span>
+        {% else %}
+          <span class="health-badge error"><span class="status-dot red"></span> {{ erros_recentes }} erro(s)</span>
+        {% endif %}
+      </div>
+      <div class="sch-grid">
+        <div class="sch-item">
+          <div class="sch-label">Automação</div>
+          <div class="sch-value">
+            <span class="status-dot {% if scheduler_status == 'ativa' %}green{% else %}red{% endif %}"></span>
+            {{ scheduler_status | capitalize }}
           </div>
         </div>
-        {% endfor %}
-      {% else %}
-        <div class="empty-state" style="padding:40px 20px">
-          <i class="bi bi-terminal"></i>
-          <h3>Sem execuções ainda</h3>
-          <p>Clique em "Buscar Agora" para fazer a primeira coleta.</p>
+        <div class="sch-item">
+          <div class="sch-label">Próxima Coleta</div>
+          <div class="sch-value" style="font-size:13px;">{{ next_run }}</div>
         </div>
-      {% endif %}
+        <div class="sch-item">
+          <div class="sch-label">Última Coleta</div>
+          <div class="sch-value" style="font-size:13px;">
+            {% if ultimo_log %}
+              <span class="badge {% if ultimo_log.status == 'sucesso' %}badge-success{% elif ultimo_log.status == 'erro' %}badge-danger{% else %}badge-warning{% endif %}">
+                {{ ultimo_log.status }}
+              </span>
+            {% else %}
+              <span class="text-muted">Nenhuma</span>
+            {% endif %}
+          </div>
+        </div>
+        <div class="sch-item">
+          <div class="sch-label">Fuso Horário</div>
+          <div class="sch-value" style="font-size:12px;" id="clockDisplay">{{ hora_atual }}</div>
+        </div>
+      </div>
     </div>
   </div>
 
-  <!-- Quick actions -->
-  <div style="display:flex;flex-direction:column;gap:16px">
+  <!-- Right Column -->
+  <div style="display:flex;flex-direction:column;gap:20px;">
+    <!-- Logs Recentes -->
     <div class="card">
-      <div class="card-header" style="margin-bottom:16px">
-        <div class="card-title"><i class="bi bi-lightning-charge" style="color:var(--warning);margin-right:8px"></i>Ações Rápidas</div>
+      <div class="card-header">
+        <span class="card-title"><i class="bi bi-journal-text" style="color:var(--info);margin-right:6px;"></i> Coletas Recentes</span>
       </div>
-      <div style="display:flex;flex-direction:column;gap:10px">
-        {% if current_user.has_perm('efetuar_busca') %}
-        <button class="btn btn-primary w-100" id="btnBuscar2" onclick="iniciarBusca()">
-          <i class="bi bi-search"></i> Buscar Verificações Agora
-        </button>
+      <ul class="log-list">
+        {% for l in ultimos_logs %}
+        <li class="log-item">
+          {% if l.status == 'sucesso' %}
+            <i class="bi bi-check-circle" style="color:var(--success);"></i>
+          {% elif l.status == 'erro' %}
+            <i class="bi bi-x-circle" style="color:var(--danger);"></i>
+          {% else %}
+            <i class="bi bi-arrow-repeat" style="color:var(--warning);animation:spin 1s linear infinite;"></i>
+          {% endif %}
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+              {{ l.mensagem or 'Sem detalhes' }}
+            </div>
+            <div class="log-time">{{ l.executado_em.strftime('%d/%m %H:%M') if l.executado_em else '' }}</div>
+          </div>
+          {% if l.total_coletados %}
+          <span class="badge badge-info">{{ l.total_coletados }}</span>
+          {% endif %}
+        </li>
+        {% endfor %}
+        {% if not ultimos_logs %}
+        <li class="log-item" style="justify-content:center;color:var(--text-d);">
+          <i class="bi bi-inbox"></i> Nenhuma coleta registrada
+        </li>
         {% endif %}
-        {% if atrasados > 0 %}
-        <a href="{{ url_for('verificacoes.index') }}?tab=atrasado" class="btn w-100"
-           style="background:rgba(239,68,68,0.12);color:#fca5a5;border:1px solid rgba(239,68,68,0.25)">
-          <i class="bi bi-exclamation-triangle"></i> Ver {{ atrasados }} Atrasado{{ 's' if atrasados != 1 }}
-        </a>
-        {% endif %}
-        <a href="{{ url_for('verificacoes.index') }}" class="btn btn-ghost w-100">
-          <i class="bi bi-table"></i> Ver Todas as Verificações
-        </a>
-        <a href="{{ url_for('mensagens.index') }}" class="btn btn-ghost w-100">
-          <i class="bi bi-chat-dots"></i> Gerenciar Mensagens
-        </a>
-        <a href="{{ url_for('configuracoes.index') }}" class="btn btn-ghost w-100">
-          <i class="bi bi-gear"></i> Configurações
-        </a>
-      </div>
+      </ul>
     </div>
 
-    {% if ultimo_log %}
+    <!-- Ações Rápidas -->
     <div class="card">
-      <div class="card-title" style="margin-bottom:14px">
-        <i class="bi bi-clock" style="color:var(--text-m);margin-right:6px"></i>Última Execução
+      <div class="card-header">
+        <span class="card-title"><i class="bi bi-lightning" style="color:var(--warning);margin-right:6px;"></i> Ações Rápidas</span>
       </div>
-      <div style="font-size:12.5px;color:var(--text-m);display:flex;flex-direction:column;gap:8px">
-        <div>
-          <span class="text-muted">Status:</span>
-          <span class="badge badge-{{ 'success' if ultimo_log.status == 'sucesso' else ('warning' if ultimo_log.status == 'executando' else 'danger') }}" style="margin-left:6px">
-            {{ ultimo_log.status | upper }}
-          </span>
-        </div>
-        <div><span class="text-muted">Data:</span> <strong>{{ ultimo_log.executado_em.strftime('%d/%m/%Y %H:%M') if ultimo_log.executado_em }}</strong></div>
-        <div><span class="text-muted">Coletados:</span> <strong>{{ ultimo_log.total_coletados }}</strong></div>
-        {% if ultimo_log.mensagem %}
-        <div style="background:var(--surface-2);border-radius:6px;padding:8px 10px;color:var(--text-d);font-size:12px;margin-top:4px">
-          {{ ultimo_log.mensagem[:120] }}{% if ultimo_log.mensagem|length > 120 %}...{% endif %}
-        </div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <a href="{{ url_for('verificacoes.index') }}?status=atrasado" class="btn btn-ghost w-100" style="justify-content:flex-start;">
+          <i class="bi bi-exclamation-triangle" style="color:var(--danger);"></i> Ver Atrasados
+          {% if atrasados > 0 %}<span class="nav-badge" style="margin-left:auto;">{{ atrasados }}</span>{% endif %}
+        </a>
+        <a href="{{ url_for('verificacoes.index') }}" class="btn btn-ghost w-100" style="justify-content:flex-start;">
+          <i class="bi bi-clipboard-check" style="color:var(--primary-l);"></i> Gerenciar Verificações
+        </a>
+        {% if current_user.is_admin or current_user.has_perm('ver_analise') %}
+        <a href="{{ url_for('analise.index') }}" class="btn btn-ghost w-100" style="justify-content:flex-start;">
+          <i class="bi bi-graph-up" style="color:var(--success);"></i> Análise Mensal
+        </a>
         {% endif %}
       </div>
     </div>
-    {% endif %}
+  </div>
+</div>
+
+<!-- Polling status indicator -->
+<div id="pollingStatus" style="display:none;position:fixed;bottom:80px;right:24px;z-index:900;">
+  <div class="badge badge-warning" style="padding:8px 14px;font-size:12px;box-shadow:var(--shadow);">
+    <span class="spinner"></span> Coleta em andamento...
   </div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-let polling = null;
-let buscaIniciada = false;
-
-function setBtnState(loading) {
-  ['btnBuscar','btnBuscar2'].forEach(id => {
-    const btn = document.getElementById(id);
-    if (!btn) return;
-    if (loading) {
-      btn.innerHTML = '<span class="spinner"></span> Coletando...';
-      btn.disabled = true;
-    } else {
-      btn.innerHTML = '<i class="bi bi-search"></i> Buscar Agora';
-      btn.disabled = false;
+// ─── Counter Animation ───
+function animateCounters() {
+  document.querySelectorAll('.stat-value[data-count]').forEach(el => {
+    const target = parseInt(el.dataset.count) || 0;
+    const duration = 800;
+    const start = performance.now();
+    function tick(now) {
+      const elapsed = now - start;
+      const progress = Math.min(elapsed / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3); // easeOutCubic
+      el.textContent = Math.round(target * eased);
+      if (progress < 1) requestAnimationFrame(tick);
     }
+    requestAnimationFrame(tick);
   });
-  document.getElementById('progressBar').style.display = loading ? 'block' : 'none';
 }
 
-async function iniciarBusca() {
-  if (buscaIniciada) return;
-  buscaIniciada = true;
-  setBtnState(true);
-  showToast('Busca iniciada. Aguarde...', 'info', 3000);
-
-  try {
-    const r = await fetch('/api/buscar', {method: 'POST'});
-    const data = await r.json();
-
-    if (data.status === 'ocupado') {
-      showToast(data.mensagem, 'warning');
-      setBtnState(false);
-      buscaIniciada = false;
-      return;
-    }
-
-    // Poll for completion
-    polling = setInterval(verificarStatus, 4000);
-
-  } catch(e) {
-    showToast('Erro ao iniciar busca: ' + e.message, 'error');
-    setBtnState(false);
-    buscaIniciada = false;
-  }
+// ─── Progress Ring Animation ───
+function animateProgress() {
+  const pct = {{ progresso_pct }};
+  const arc = document.getElementById('progressArc');
+  const txt = document.getElementById('progressText');
+  if (!arc) return;
+  const circumference = 213.6;
+  const offset = circumference - (pct / 100) * circumference;
+  setTimeout(() => {
+    arc.style.strokeDashoffset = offset;
+    txt.textContent = pct + '%';
+  }, 300);
 }
 
-async function verificarStatus() {
-  try {
-    const r = await fetch('/api/status');
-    const data = await r.json();
+// ─── Sparkline ───
+function renderSparkline() {
+  const data = {{ sparkline_data | tojson }};
+  const container = document.getElementById('sparkline');
+  const labels = document.getElementById('sparkLabels');
+  if (!container || !data.length) return;
 
-    if (!data.executando) {
-      clearInterval(polling);
-      polling = null;
-      setBtnState(false);
-      buscaIniciada = false;
+  const maxVal = Math.max(...data.map(d => d.total), 1);
+  container.innerHTML = '';
+  labels.innerHTML = '';
 
-      const log = data.ultimo_log;
-      if (log) {
-        if (log.status === 'sucesso') {
-          showToast(`✅ Coleta concluída: ${log.mensagem}`, 'success', 6000);
-        } else if (log.status === 'erro') {
-          showToast(`❌ Erro na coleta: ${log.mensagem}`, 'error', 8000);
-        }
+  data.forEach((d, i) => {
+    const h = Math.max(4, (d.total / maxVal) * 36);
+    const hv = Math.max(0, (d.verificados / maxVal) * 36);
+    const bar = document.createElement('div');
+    bar.className = 'sparkline-bar';
+    bar.style.height = '0px';
+    bar.style.background = d.verificados > 0
+      ? `linear-gradient(to top, var(--success) ${(hv/h*100).toFixed(0)}%, var(--primary) ${(hv/h*100).toFixed(0)}%)`
+      : 'var(--primary)';
+    bar.innerHTML = `<div class="spark-tip">Dia ${d.dia}: ${d.total} total, ${d.verificados} verificados</div>`;
+    container.appendChild(bar);
+
+    // Animate
+    setTimeout(() => { bar.style.height = h + 'px'; }, 100 + i * 80);
+
+    // Label
+    const lbl = document.createElement('span');
+    lbl.textContent = d.dia;
+    labels.appendChild(lbl);
+  });
+}
+
+// ─── Clock ───
+function updateClock() {
+  const el = document.getElementById('clockDisplay');
+  if (!el) return;
+  const offset = {{ tz_offset }};
+  const now = new Date();
+  const utc = now.getTime() + now.getTimezoneOffset() * 60000;
+  const local = new Date(utc + offset * 3600000);
+  el.textContent = local.toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+}
+
+// ─── Buscar SABER ───
+function buscarDados() {
+  const btn = document.getElementById('btnBuscar');
+  if (!btn) return;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> <span>Buscando...</span>';
+
+  fetch('/api/buscar', { method: 'POST', headers: {'Content-Type': 'application/json'} })
+    .then(r => r.json())
+    .then(d => {
+      if (d.status === 'iniciado') {
+        showToast('Coleta iniciada! Aguarde...', 'info');
+        document.getElementById('pollingStatus').style.display = 'block';
+        pollStatus();
+      } else if (d.status === 'ocupado') {
+        showToast(d.mensagem, 'warning');
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-cloud-download"></i> <span>Buscar SABER</span>';
+      } else {
+        showToast(d.mensagem || 'Erro na coleta.', 'error');
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-cloud-download"></i> <span>Buscar SABER</span>';
       }
-
-      // Refresh page after 1.5s
-      setTimeout(() => location.reload(), 1500);
-    }
-  } catch(e) {
-    console.error(e);
-  }
+    })
+    .catch(() => {
+      showToast('Falha de comunicação com o servidor.', 'error');
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-cloud-download"></i> <span>Buscar SABER</span>';
+    });
 }
 
-async function refreshStatus() {
-  const r = await fetch('/api/status');
-  const data = await r.json();
-  if (data.executando) {
-    showToast('Coleta em andamento...', 'info');
-    setBtnState(true);
-    buscaIniciada = true;
-    if (!polling) polling = setInterval(verificarStatus, 4000);
-  } else {
-    location.reload();
-  }
+function pollStatus() {
+  fetch('/api/status')
+    .then(r => r.json())
+    .then(d => {
+      if (d.executando) {
+        setTimeout(pollStatus, 3000);
+      } else {
+        document.getElementById('pollingStatus').style.display = 'none';
+        const btn = document.getElementById('btnBuscar');
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '<i class="bi bi-cloud-download"></i> <span>Buscar SABER</span>';
+        }
+        if (d.ultimo_log && d.ultimo_log.status === 'sucesso') {
+          showToast('Coleta finalizada com sucesso!', 'success');
+        } else if (d.ultimo_log) {
+          showToast('Coleta finalizada: ' + (d.ultimo_log.mensagem || ''), d.ultimo_log.status === 'erro' ? 'error' : 'info');
+        }
+        setTimeout(() => location.reload(), 1500);
+      }
+    })
+    .catch(() => setTimeout(pollStatus, 5000));
 }
 
-// ── Relógio em tempo real (usa offset UTC calculado pelo servidor) ──────────
-(function() {
-  const tzOffset = {{ tz_offset }};  // horas (ex: -3)
-  function tick() {
-    const now = new Date();
-    // Ajusta para o fuso do servidor
-    const local = new Date(now.getTime() + (tzOffset * 3600000) + (now.getTimezoneOffset() * 60000));
-    const hh = String(local.getHours()).padStart(2,'0');
-    const mm = String(local.getMinutes()).padStart(2,'0');
-    const ss = String(local.getSeconds()).padStart(2,'0');
-    const el = document.getElementById('relogioHora');
-    if (el) el.textContent = `${hh}:${mm}:${ss}`;
-  }
-  tick();
-  setInterval(tick, 1000);
-})();
+// ─── Mudar mês ───
+function mudarMes(val) {
+  const url = new URL(window.location);
+  url.searchParams.set('mes', val);
+  window.location = url.toString();
+}
 
-(async () => {
-  const r = await fetch('/api/status');
-  const data = await r.json();
-  if (data.executando) {
-    setBtnState(true);
-    buscaIniciada = true;
-    showToast('Coleta em andamento...', 'info');
-    polling = setInterval(verificarStatus, 4000);
-  }
-})();
+// ─── Init ───
+document.addEventListener('DOMContentLoaded', () => {
+  animateCounters();
+  animateProgress();
+  renderSparkline();
+  updateClock();
+  setInterval(updateClock, 1000);
+});
 </script>
 {% endblock %}

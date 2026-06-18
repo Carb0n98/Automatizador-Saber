@@ -1,6 +1,14 @@
 """
 Tarefa de coleta de dados do sistema SABER via Selenium.
 Chamada pelo scheduler diário (07:00) e pelo botão de busca manual.
+
+Correções implementadas:
+- Deduplicação em memória para evitar INSERTs duplicados na mesma sessão
+- Chave de identidade expandida: (nome, data_verificacao, atividade)
+- Filtro de mês atual: ignora registros de meses anteriores na coleta automática
+- Fallback de data removido: registros com data inválida são descartados com log
+- Lock protegido com try/finally para evitar deadlock
+- Logs detalhados de cada etapa da coleta
 """
 from datetime import datetime
 import threading
@@ -34,16 +42,26 @@ def executar_coleta(app, origem='automatico'):
     """
     global _is_running
 
-    # Fix #3: usar o lock para evitar race condition real
+    # Usar o lock para evitar race condition
     if not _scraping_lock.acquire(blocking=False):
         return {'status': 'ocupado', 'mensagem': 'Uma coleta já está em andamento.'}
 
     _is_running = True
 
+    try:
+        return _executar_coleta_interno(app, origem)
+    finally:
+        _is_running = False
+        _scraping_lock.release()
+
+
+def _executar_coleta_interno(app, origem):
+    """Lógica interna de coleta, protegida pelo lock externo."""
+
     with app.app_context():
         from .models import db, Config, Verificacao, LogAutomacao
         from .utils import hoje_local
-        from .logger import log_info, log_error
+        from .logger import log_info, log_error, log_warn, log_audit
 
         # Cria log de execução inicial
         log = LogAutomacao(
@@ -56,6 +74,8 @@ def executar_coleta(app, origem='automatico'):
         log_id = log.id
         log_info('Coleta SABER iniciada.', origem='scheduler')
 
+        driver = None
+
         try:
             url = Config.get('saber_url', 'https://adtalento.com/websiteSaber')
             usuario = Config.get('saber_usuario', '')
@@ -66,7 +86,6 @@ def executar_coleta(app, origem='automatico'):
             if not usuario or not senha:
                 _finalizar_log(db, LogAutomacao, log_id, 'erro', 0,
                                'Credenciais não configuradas. Acesse Configurações e informe usuário/senha do SABER.')
-                _is_running = False
                 return {'status': 'erro', 'mensagem': 'Credenciais não configuradas'}
 
             # ──────────────── Selenium ────────────────
@@ -87,7 +106,7 @@ def executar_coleta(app, origem='automatico'):
             options.add_argument('--disable-extensions')
             options.add_argument('--disable-software-rasterizer')
 
-            # Suporte a Docker: usa CHROME_BIN se disponível (ex: /usr/bin/chromium)
+            # Suporte a Docker: usa CHROME_BIN se disponível
             chrome_bin = os.environ.get('CHROME_BIN')
             if chrome_bin:
                 options.binary_location = chrome_bin
@@ -96,10 +115,7 @@ def executar_coleta(app, origem='automatico'):
             chromedriver_bin = os.environ.get('CHROMEDRIVER_BIN')
             service = Service(executable_path=chromedriver_bin) if chromedriver_bin else Service()
 
-            # Fix #1: declarar driver=None antes para evitar NameError no except
-            driver = None
             driver = webdriver.Chrome(service=service, options=options)
-            # Fix #6: timeouts para evitar travamento infinito
             driver.set_page_load_timeout(_SELENIUM_TIMEOUT)
             driver.set_script_timeout(30)
             wait = WebDriverWait(driver, 20)
@@ -127,9 +143,11 @@ def executar_coleta(app, origem='automatico'):
             driver.find_element(By.ID, 'ContentPlaceHolder1_btnConsulta').click()
             wait.until(EC.presence_of_element_located((By.TAG_NAME, 'table')))
 
-            # Extração de dados (paginada)
+            # ──────────────── Extração de dados (paginada) ────────────────
             todos_dados = []
+            pagina = 0
             while True:
+                pagina += 1
                 tabela = wait.until(EC.presence_of_element_located((By.ID, 'example')))
                 linhas = tabela.find_elements(By.CSS_SELECTOR, 'tbody tr')
                 primeiro_nome = linhas[0].text if linhas else ''
@@ -164,88 +182,143 @@ def executar_coleta(app, origem='automatico'):
                     break
 
             driver.quit()
+            driver = None
+
+            log_info(f'Extração finalizada: {len(todos_dados)} linhas em {pagina} página(s).', origem='scheduler')
 
             # ──────────────── Sincronização Inteligente ────────────────
-            # Estratégia: comparar conjunto do SABER com banco para
-            # INSERT (novos), UPDATE (status mudou), DELETE (desligados).
-            # Marcações manuais de 'apto' feitas na UI são preservadas.
+            # Chave de identidade expandida: (nome, data_verificacao, atividade)
+            # Tracking em memória para evitar duplicatas na mesma sessão
             hoje = hoje_local()
             novos = 0
             atualizados = 0
             removidos = 0
+            ignorados_data = 0
+            ignorados_mes = 0
+            duplicados_sessao = 0
 
-            # Chave de identidade: (nome, data_verificacao)
-            # Usando o mês da data de verificação do dado coletado
+            from .constants import SABER_STATUS_MAP, is_verificado
+
+            # Set para rastrear chaves já processadas nesta coleta
+            chaves_processadas = set()
+            # Set com todas as chaves vindas do SABER (para etapa DELETE)
             saber_keys = set()
-            for d in todos_dados:
-                try:
-                    data_verif = datetime.strptime(d['data'], '%d/%m/%Y').date()
-                except Exception:
-                    data_verif = hoje
-                saber_keys.add((d['nome'], data_verif))
 
-            # INSERT / UPDATE: processa cada linha coletada do SABER
             for d in todos_dados:
-                from .constants import SABER_STATUS_MAP, is_verificado
-                status_saber = SABER_STATUS_MAP.get(d['status_raw'], 'pendente')
+                # Parse da data — sem fallback silencioso
                 try:
                     data_verif = datetime.strptime(d['data'], '%d/%m/%Y').date()
                 except Exception:
-                    data_verif = hoje
+                    ignorados_data += 1
+                    log_warn(
+                        f'Registro ignorado: data inválida "{d["data"]}" para {d["nome"]}.',
+                        origem='scheduler'
+                    )
+                    continue
+
+                # Filtro de mês atual: coleta automática só processa mês corrente
+                if origem == 'automatico':
+                    if data_verif.month != hoje.month or data_verif.year != hoje.year:
+                        ignorados_mes += 1
+                        continue
+
+                atividade = d['atividade'] or ''
+                chave = (d['nome'], data_verif, atividade)
+                saber_keys.add(chave)
+
+                # Deduplicação em memória: evita processar a mesma chave 2x na mesma coleta
+                if chave in chaves_processadas:
+                    duplicados_sessao += 1
+                    continue
+                chaves_processadas.add(chave)
+
+                status_saber = SABER_STATUS_MAP.get(d['status_raw'], 'pendente')
 
                 existe = Verificacao.query.filter_by(
                     nome=d['nome'],
-                    data_verificacao=data_verif
+                    data_verificacao=data_verif,
+                    atividade=atividade,
                 ).first()
 
                 if existe:
-                    # Só atualiza status se o SABER mudou para um status verificado
+                    # Só atualiza status se o SABER mudou para verificado
                     # (nunca rebaixa uma marcação verificada para pendente)
+                    mudou = False
                     if is_verificado(status_saber) and not is_verificado(existe.status):
                         existe.status = status_saber
+                        mudou = True
+                    # Atualiza cargo se mudou
+                    if d['cargo'] and d['cargo'] != existe.cargo:
                         existe.cargo = d['cargo']
-                        existe.atividade = d['atividade']
+                        mudou = True
+                    if mudou:
                         atualizados += 1
                 else:
-                    # Funcionário novo no SABER ou nova data de verificação
+                    # Novo registro
                     db.session.add(Verificacao(
                         nome=d['nome'],
                         cargo=d['cargo'],
-                        atividade=d['atividade'],
+                        atividade=atividade,
                         data_verificacao=data_verif,
                         status=status_saber,
                         origem=origem,
                     ))
                     novos += 1
+                    # Flush para que queries subsequentes encontrem este registro
+                    db.session.flush()
 
             # DELETE: remove do banco quem não veio mais no SABER
             # Escopo: apenas registros com data de verificação dentro do mês atual
-            # (não toca registros históricos de meses anteriores)
-            from sqlalchemy import extract as sa_extract
+            import calendar
+            primeiro_dia = hoje.replace(day=1)
+            ultimo_dia_num = calendar.monthrange(hoje.year, hoje.month)[1]
+            ultimo_dia = hoje.replace(day=ultimo_dia_num)
+
             registros_mes = Verificacao.query.filter(
-                sa_extract('month', Verificacao.data_verificacao) == hoje.month,
-                sa_extract('year',  Verificacao.data_verificacao) == hoje.year,
+                Verificacao.data_verificacao >= primeiro_dia,
+                Verificacao.data_verificacao <= ultimo_dia,
             ).all()
 
             for reg in registros_mes:
-                chave = (reg.nome, reg.data_verificacao)
+                chave = (reg.nome, reg.data_verificacao, reg.atividade or '')
                 if chave not in saber_keys:
                     db.session.delete(reg)
                     removidos += 1
 
             db.session.commit()
 
-            msg = (f'{novos} novos. '
-                   f'{atualizados} atualizados para VERIFICADO. '
-                   f'{removidos} removidos (desligados/não encontrados no SABER).')
+            # Relatório detalhado
+            partes_msg = [f'{novos} novos']
+            if atualizados:
+                partes_msg.append(f'{atualizados} atualizados')
+            if removidos:
+                partes_msg.append(f'{removidos} removidos')
+            if duplicados_sessao:
+                partes_msg.append(f'{duplicados_sessao} duplicados ignorados')
+            if ignorados_data:
+                partes_msg.append(f'{ignorados_data} com data inválida')
+            if ignorados_mes:
+                partes_msg.append(f'{ignorados_mes} de outros meses')
+            msg = '. '.join(partes_msg) + '.'
+
             _finalizar_log(db, LogAutomacao, log_id, 'sucesso', novos + atualizados, msg)
             log_info(msg, origem='scheduler')
-            _is_running = False
-            _scraping_lock.release()
-            return {'status': 'sucesso', 'total': len(todos_dados), 'novos': novos, 'removidos': removidos}
+            log_audit(
+                f'Coleta {origem}: {len(todos_dados)} extraídos, {novos} inseridos, '
+                f'{atualizados} atualizados, {removidos} removidos.',
+                origem='scheduler'
+            )
+
+            return {
+                'status': 'sucesso',
+                'total': len(todos_dados),
+                'novos': novos,
+                'atualizados': atualizados,
+                'removidos': removidos,
+                'duplicados_ignorados': duplicados_sessao,
+            }
 
         except Exception as e:
-            # Fix #1: só chama quit() se driver foi realmente criado
             if driver is not None:
                 try:
                     driver.quit()
@@ -254,19 +327,17 @@ def executar_coleta(app, origem='automatico'):
             import traceback as _tb
             _finalizar_log(db, LogAutomacao, log_id, 'erro', 0, str(e))
             log_error(f'Erro na coleta SABER: {e}', origem='scheduler', detalhe=_tb.format_exc())
-            _is_running = False
-            _scraping_lock.release()
             return {'status': 'erro', 'mensagem': str(e)}
 
 
 def _finalizar_log(db, LogAutomacao, log_id, status, total, mensagem):
-    # Fix #2: usar merge para segurança se a sessão estiver suja
+    """Atualiza log de automação com resultado final."""
     try:
         log = db.session.get(LogAutomacao, log_id)
         if log:
             log.status = status
             log.total_coletados = total
-            log.mensagem = mensagem[:2000] if mensagem else mensagem  # truncar mensagens longas
+            log.mensagem = mensagem[:2000] if mensagem else mensagem
             db.session.commit()
     except Exception:
         db.session.rollback()
