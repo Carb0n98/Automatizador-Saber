@@ -3,8 +3,42 @@ from flask_login import login_required, current_user
 from ..models import User
 from ..extensions import db, bcrypt
 from ..utils import PERMISSIONS, require_admin
+from ..logger import log_audit
+
+import secrets
+import string
 
 usuarios_bp = Blueprint('usuarios', __name__, url_prefix='/usuarios')
+
+
+def _gerar_senha_segura(tamanho=16):
+    """
+    Gera senha aleatória segura com pelo menos:
+    - 2 maiúsculas, 2 minúsculas, 2 dígitos, 2 caracteres especiais.
+    Comprimento mínimo: 12 caracteres.
+    """
+    tamanho = max(tamanho, 12)
+    maiusculas = string.ascii_uppercase
+    minusculas = string.ascii_lowercase
+    digitos = string.digits
+    especiais = '!@#$%&*?'
+
+    # Garantir pelo menos 2 de cada categoria
+    senha_chars = [
+        secrets.choice(maiusculas), secrets.choice(maiusculas),
+        secrets.choice(minusculas), secrets.choice(minusculas),
+        secrets.choice(digitos), secrets.choice(digitos),
+        secrets.choice(especiais), secrets.choice(especiais),
+    ]
+    # Preencher o restante com mix de todos
+    todos = maiusculas + minusculas + digitos + especiais
+    for _ in range(tamanho - len(senha_chars)):
+        senha_chars.append(secrets.choice(todos))
+
+    # Embaralhar para evitar padrão previsível
+    resultado = list(senha_chars)
+    secrets.SystemRandom().shuffle(resultado)
+    return ''.join(resultado)
 
 
 @usuarios_bp.route('/')
@@ -25,26 +59,40 @@ def index():
 def api_criar():
     data = request.get_json()
     username = (data.get('username') or '').strip()
-    password = (data.get('password') or '').strip()
     is_admin = bool(data.get('is_admin', False))
     perms = data.get('permissions', [])
 
-    if not username or not password:
-        return jsonify({'status': 'erro', 'mensagem': 'Usuário e senha são obrigatórios.'}), 400
+    if not username:
+        return jsonify({'status': 'erro', 'mensagem': 'Nome de usuário é obrigatório.'}), 400
 
     if User.query.filter_by(username=username).first():
         return jsonify({'status': 'erro', 'mensagem': 'Nome de usuário já existe.'}), 400
 
+    # Gerar senha temporária segura automaticamente
+    senha_temporaria = _gerar_senha_segura(16)
+
     u = User(
         username=username,
-        password_hash=bcrypt.generate_password_hash(password).decode('utf-8'),
+        password_hash=bcrypt.generate_password_hash(senha_temporaria).decode('utf-8'),
         is_admin=is_admin,
         ativo=True,
+        must_change_password=True,
     )
     u.set_perms(perms)
     db.session.add(u)
     db.session.commit()
-    return jsonify({'status': 'ok', 'mensagem': f'Usuário "{username}" criado.', 'user': u.to_dict()}), 201
+
+    log_audit(
+        f'Usuário "{username}" criado com senha temporária (troca obrigatória)',
+        origem='usuarios'
+    )
+
+    return jsonify({
+        'status': 'ok',
+        'mensagem': f'Usuário "{username}" criado com sucesso.',
+        'user': u.to_dict(),
+        'senha_temporaria': senha_temporaria,
+    }), 201
 
 
 @usuarios_bp.route('/api/<int:uid>', methods=['PUT'])
@@ -85,6 +133,34 @@ def api_editar(uid):
     u.set_perms([] if is_admin else perms)  # Admin não precisa de perms explícitas
     db.session.commit()
     return jsonify({'status': 'ok', 'mensagem': f'Usuário "{u.username}" atualizado.', 'user': u.to_dict()})
+
+
+@usuarios_bp.route('/api/<int:uid>/reset-senha', methods=['POST'])
+@login_required
+@require_admin
+def api_reset_senha(uid):
+    """Gera nova senha temporária e redefine must_change_password=True."""
+    u = db.session.get(User, uid)
+    if not u:
+        return jsonify({'status': 'erro', 'mensagem': 'Usuário não encontrado.'}), 404
+
+    nova_senha = _gerar_senha_segura(16)
+    u.password_hash = bcrypt.generate_password_hash(nova_senha).decode('utf-8')
+    u.must_change_password = True
+    u.password_changed_at = None
+    db.session.commit()
+
+    log_audit(
+        f'Senha temporária redefinida pelo admin para usuário "{u.username}" (troca obrigatória)',
+        origem='usuarios'
+    )
+
+    return jsonify({
+        'status': 'ok',
+        'mensagem': f'Nova senha temporária gerada para "{u.username}".',
+        'senha_temporaria': nova_senha,
+        'user': u.to_dict(),
+    })
 
 
 @usuarios_bp.route('/api/<int:uid>', methods=['DELETE'])

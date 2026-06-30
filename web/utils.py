@@ -95,6 +95,8 @@ def migrate_user_columns(db):
         ("is_admin",    "BOOLEAN DEFAULT 0 NOT NULL"),
         ("ativo",       "BOOLEAN DEFAULT 1 NOT NULL"),
         ("permissions", "TEXT DEFAULT '[]'"),
+        ("must_change_password", "BOOLEAN DEFAULT 1 NOT NULL"),
+        ("password_changed_at",  "DATETIME"),
     ]
     try:
         with db.engine.connect() as conn:

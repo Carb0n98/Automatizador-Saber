@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Alterar Senha — AutoVerifica</title>
+  <meta name="description" content="Altere sua senha temporária para acessar o sistema"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #080910; --surface: #101118; --surface-2: #181921;
+      --border: rgba(255,255,255,0.07); --border-h: rgba(255,255,255,0.14);
+      --primary: #7c3aed; --accent: #4f46e5; --primary-l: #a78bfa;
+      --danger: #ef4444; --success: #10b981; --warning: #f59e0b;
+      --text: #e2e8f0; --text-m: #94a3b8; --text-d: #475569;
+    }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* Animated background */
+    body::before {
+      content: '';
+      position: fixed;
+      top: -200px; left: -200px;
+      width: 600px; height: 600px;
+      background: radial-gradient(circle, rgba(124,58,237,0.12) 0%, transparent 70%);
+      animation: float1 8s ease-in-out infinite;
+      pointer-events: none;
+    }
+    body::after {
+      content: '';
+      position: fixed;
+      bottom: -200px; right: -200px;
+      width: 500px; height: 500px;
+      background: radial-gradient(circle, rgba(79,70,229,0.10) 0%, transparent 70%);
+      animation: float2 10s ease-in-out infinite;
+      pointer-events: none;
+    }
+
+    @keyframes float1 { 0%,100%{transform:translate(0,0)} 50%{transform:translate(40px,30px)} }
+    @keyframes float2 { 0%,100%{transform:translate(0,0)} 50%{transform:translate(-30px,-40px)} }
+
+    .change-container {
+      width: 100%;
+      max-width: 460px;
+      padding: 20px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .change-logo {
+      text-align: center;
+      margin-bottom: 28px;
+    }
+
+    .logo-icon {
+      width: 64px;
+      height: 64px;
+      background: linear-gradient(135deg, var(--warning), #f97316);
+      border-radius: 18px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      color: white;
+      margin-bottom: 16px;
+      box-shadow: 0 8px 32px rgba(245,158,11,0.4);
+      animation: glow 3s ease-in-out infinite;
+    }
+
+    @keyframes glow {
+      0%, 100% { box-shadow: 0 8px 32px rgba(245,158,11,0.4); }
+      50% { box-shadow: 0 8px 48px rgba(245,158,11,0.65); }
+    }
+
+    .change-logo h1 {
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      background: linear-gradient(135deg, #e2e8f0, #fcd34d);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .change-logo p {
+      font-size: 13px;
+      color: var(--text-m);
+      margin-top: 4px;
+    }
+
+    .change-card {
+      background: var(--surface);
+      border: 1px solid var(--border-h);
+      border-radius: 18px;
+      padding: 32px 28px;
+      box-shadow: 0 24px 80px rgba(0,0,0,0.5);
+      backdrop-filter: blur(20px);
+    }
+
+    .alert-mandatory {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 14px 16px;
+      border-radius: 10px;
+      margin-bottom: 24px;
+      font-size: 13px;
+      font-weight: 500;
+      background: rgba(245,158,11,0.1);
+      color: #fcd34d;
+      border: 1px solid rgba(245,158,11,0.25);
+      line-height: 1.5;
+    }
+    .alert-mandatory i { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+
+    .alert {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 14px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+      font-size: 13px;
+      font-weight: 500;
+      animation: slideIn 0.3s ease;
+    }
+    @keyframes slideIn { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:translateY(0); } }
+
+    .alert-danger { background: rgba(239,68,68,0.1); color: #fca5a5; border: 1px solid rgba(239,68,68,0.25); }
+    .alert-success { background: rgba(16,185,129,0.1); color: #6ee7b7; border: 1px solid rgba(16,185,129,0.25); }
+
+    .form-group { margin-bottom: 16px; }
+
+    label {
+      display: block;
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--text-m);
+      margin-bottom: 7px;
+    }
+
+    .input-wrap { position: relative; }
+
+    .input-wrap i.icon-left {
+      position: absolute;
+      left: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-m);
+      font-size: 14px;
+      pointer-events: none;
+    }
+
+    .input-wrap input {
+      width: 100%;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      font-size: 14px;
+      padding: 11px 42px 11px 40px;
+      outline: none;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+
+    .input-wrap input:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(124,58,237,0.15);
+    }
+
+    .toggle-pw {
+      position: absolute;
+      right: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: none;
+      border: none;
+      color: var(--text-m);
+      cursor: pointer;
+      font-size: 14px;
+      padding: 4px;
+      transition: color 0.15s;
+    }
+    .toggle-pw:hover { color: var(--text); }
+
+    /* ─── Strength meter ─── */
+    .strength-section { margin-top: 16px; margin-bottom: 8px; }
+
+    .strength-bar {
+      height: 4px;
+      background: var(--surface-2);
+      border-radius: 99px;
+      overflow: hidden;
+      margin-bottom: 10px;
+    }
+    .strength-bar-fill {
+      height: 100%;
+      width: 0%;
+      border-radius: 99px;
+      transition: width 0.3s, background 0.3s;
+    }
+    .strength-label {
+      font-size: 11.5px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .rules-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px 16px;
+    }
+
+    .rule-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--text-d);
+      transition: color 0.2s;
+    }
+    .rule-item i {
+      font-size: 12px;
+      width: 16px;
+      text-align: center;
+      transition: color 0.2s;
+    }
+    .rule-item.valid { color: var(--success); }
+    .rule-item.valid i { color: var(--success); }
+    .rule-item.invalid { color: var(--danger); }
+    .rule-item.invalid i { color: var(--danger); }
+
+    .btn-submit {
+      width: 100%;
+      padding: 12px;
+      background: linear-gradient(135deg, var(--primary), var(--accent));
+      border: none;
+      border-radius: 8px;
+      color: white;
+      font-family: 'Inter', sans-serif;
+      font-size: 14.5px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s;
+      margin-top: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      box-shadow: 0 4px 20px rgba(124,58,237,0.4);
+    }
+
+    .btn-submit:hover { transform: translateY(-1px); box-shadow: 0 6px 28px rgba(124,58,237,0.55); }
+    .btn-submit:active { transform: translateY(0); }
+    .btn-submit:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+    .btn-logout {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      width: 100%;
+      padding: 10px;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text-m);
+      font-family: 'Inter', sans-serif;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+      margin-top: 10px;
+    }
+    .btn-logout:hover { border-color: var(--danger); color: var(--danger); }
+
+    .footer-note {
+      text-align: center;
+      margin-top: 24px;
+      font-size: 12px;
+      color: var(--text-d);
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    @media (max-width: 480px) {
+      .rules-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="change-container">
+    <div class="change-logo">
+      <div class="logo-icon"><i class="bi bi-key"></i></div>
+      <h1>Alteração de Senha</h1>
+      <p>Olá, <strong>{{ current_user.username }}</strong></p>
+    </div>
+
+    <div class="change-card">
+      <div class="alert-mandatory">
+        <i class="bi bi-exclamation-triangle-fill"></i>
+        <div>
+          <strong>Troca obrigatória!</strong><br>
+          Você está utilizando uma senha temporária. Por segurança, é necessário
+          definir uma nova senha pessoal antes de acessar o sistema.
+        </div>
+      </div>
+
+      <div id="alertBox" style="display:none"></div>
+
+      <form id="changeForm" onsubmit="return false;">
+        <div class="form-group">
+          <label for="senhaAtual">Senha atual (temporária)</label>
+          <div class="input-wrap">
+            <i class="bi bi-lock icon-left"></i>
+            <input type="password" id="senhaAtual" placeholder="Digite a senha que recebeu"
+                   required autocomplete="current-password"/>
+            <button type="button" class="toggle-pw" data-target="senhaAtual">
+              <i class="bi bi-eye"></i>
+            </button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="novaSenha">Nova senha</label>
+          <div class="input-wrap">
+            <i class="bi bi-shield-lock icon-left"></i>
+            <input type="password" id="novaSenha" placeholder="Crie uma senha forte"
+                   required autocomplete="new-password"/>
+            <button type="button" class="toggle-pw" data-target="novaSenha">
+              <i class="bi bi-eye"></i>
+            </button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="confirmarSenha">Confirmar nova senha</label>
+          <div class="input-wrap">
+            <i class="bi bi-shield-check icon-left"></i>
+            <input type="password" id="confirmarSenha" placeholder="Repita a nova senha"
+                   required autocomplete="new-password"/>
+            <button type="button" class="toggle-pw" data-target="confirmarSenha">
+              <i class="bi bi-eye"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Strength meter -->
+        <div class="strength-section">
+          <div class="strength-bar"><div class="strength-bar-fill" id="strengthFill"></div></div>
+          <div class="strength-label" id="strengthLabel">
+            <i class="bi bi-shield"></i> <span>Defina sua nova senha</span>
+          </div>
+          <div class="rules-grid">
+            <div class="rule-item" id="rule-length"><i class="bi bi-circle"></i> Mínimo 12 caracteres</div>
+            <div class="rule-item" id="rule-upper"><i class="bi bi-circle"></i> Letra maiúscula</div>
+            <div class="rule-item" id="rule-lower"><i class="bi bi-circle"></i> Letra minúscula</div>
+            <div class="rule-item" id="rule-digit"><i class="bi bi-circle"></i> Número</div>
+            <div class="rule-item" id="rule-special"><i class="bi bi-circle"></i> Caractere especial</div>
+            <div class="rule-item" id="rule-match"><i class="bi bi-circle"></i> Confirmação igual</div>
+          </div>
+        </div>
+
+        <button type="submit" class="btn-submit" id="btnSubmit" disabled>
+          <i class="bi bi-check-lg"></i> Alterar Senha e Acessar
+        </button>
+      </form>
+
+      <a href="{{ url_for('auth.logout') }}" class="btn-logout">
+        <i class="bi bi-box-arrow-left"></i> Sair do sistema
+      </a>
+    </div>
+
+    <div class="footer-note">
+      &copy; 2025 AutoVerifica &mdash; Sistema de Automação
+    </div>
+  </div>
+
+  <script>
+    // ─── Toggle password visibility ───
+    document.querySelectorAll('.toggle-pw').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const inp = document.getElementById(btn.dataset.target);
+        const icon = btn.querySelector('i');
+        if (inp.type === 'password') {
+          inp.type = 'text';
+          icon.className = 'bi bi-eye-slash';
+        } else {
+          inp.type = 'password';
+          icon.className = 'bi bi-eye';
+        }
+      });
+    });
+
+    // ─── Real-time validation ───
+    const novaSenha = document.getElementById('novaSenha');
+    const confirmar = document.getElementById('confirmarSenha');
+    const btnSubmit = document.getElementById('btnSubmit');
+    const strengthFill = document.getElementById('strengthFill');
+    const strengthLabel = document.getElementById('strengthLabel');
+
+    const rules = {
+      length:  { el: document.getElementById('rule-length'),  test: s => s.length >= 12 },
+      upper:   { el: document.getElementById('rule-upper'),   test: s => /[A-Z]/.test(s) },
+      lower:   { el: document.getElementById('rule-lower'),   test: s => /[a-z]/.test(s) },
+      digit:   { el: document.getElementById('rule-digit'),   test: s => /[0-9]/.test(s) },
+      special: { el: document.getElementById('rule-special'), test: s => /[!@#$%^&*?_\-+=~`|\\:;"'<>,./()\[\]{}]/.test(s) },
+      match:   { el: document.getElementById('rule-match'),   test: () => novaSenha.value.length > 0 && novaSenha.value === confirmar.value },
+    };
+
+    function validate() {
+      const pwd = novaSenha.value;
+      let passed = 0;
+      const totalRules = Object.keys(rules).length;
+
+      for (const [key, rule] of Object.entries(rules)) {
+        const ok = rule.test(pwd);
+        if (ok) passed++;
+        rule.el.className = 'rule-item ' + (pwd.length === 0 && key !== 'match' ? '' : (ok ? 'valid' : 'invalid'));
+        rule.el.querySelector('i').className = 'bi ' + (pwd.length === 0 && key !== 'match' ? 'bi-circle' : (ok ? 'bi-check-circle-fill' : 'bi-x-circle'));
+      }
+
+      // Strength bar
+      const pct = Math.round((passed / totalRules) * 100);
+      strengthFill.style.width = pct + '%';
+
+      if (passed <= 2) {
+        strengthFill.style.background = '#ef4444';
+        strengthLabel.innerHTML = '<i class="bi bi-shield-x" style="color:#ef4444"></i> <span style="color:#fca5a5">Fraca</span>';
+      } else if (passed <= 4) {
+        strengthFill.style.background = '#f59e0b';
+        strengthLabel.innerHTML = '<i class="bi bi-shield-exclamation" style="color:#f59e0b"></i> <span style="color:#fcd34d">Média</span>';
+      } else if (passed < totalRules) {
+        strengthFill.style.background = '#38bdf8';
+        strengthLabel.innerHTML = '<i class="bi bi-shield-check" style="color:#38bdf8"></i> <span style="color:#7dd3fc">Boa</span>';
+      } else {
+        strengthFill.style.background = '#10b981';
+        strengthLabel.innerHTML = '<i class="bi bi-shield-fill-check" style="color:#10b981"></i> <span style="color:#6ee7b7">Forte — Todos os requisitos atendidos</span>';
+      }
+
+      if (pwd.length === 0) {
+        strengthFill.style.width = '0%';
+        strengthLabel.innerHTML = '<i class="bi bi-shield"></i> <span>Defina sua nova senha</span>';
+      }
+
+      btnSubmit.disabled = passed < totalRules;
+    }
+
+    novaSenha.addEventListener('input', validate);
+    confirmar.addEventListener('input', validate);
+
+    // ─── Submit ───
+    function showAlert(msg, type) {
+      const box = document.getElementById('alertBox');
+      box.innerHTML = `<div class="alert alert-${type}"><i class="bi bi-${type === 'danger' ? 'exclamation-circle' : 'check-circle'}"></i> ${msg}</div>`;
+      box.style.display = 'block';
+    }
+
+    document.getElementById('changeForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = btnSubmit;
+      btn.disabled = true;
+      btn.innerHTML = '<span style="width:16px;height:16px;border:2px solid rgba(255,255,255,0.3);border-top-color:white;border-radius:50%;animation:spin 0.7s linear infinite;display:inline-block;"></span> Alterando...';
+
+      try {
+        const r = await fetch('{{ url_for("auth.alterar_senha") }}', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            senha_atual: document.getElementById('senhaAtual').value,
+            nova_senha: novaSenha.value,
+            confirmar_senha: confirmar.value,
+            is_first_change: true,
+          }),
+        });
+
+        const data = await r.json();
+
+        if (r.ok) {
+          showAlert('Senha alterada com sucesso! Redirecionando...', 'success');
+          btn.innerHTML = '<i class="bi bi-check-lg"></i> Senha alterada!';
+          setTimeout(() => { window.location.href = '{{ url_for("dashboard.index") }}'; }, 1500);
+        } else {
+          showAlert(data.mensagem || 'Erro ao alterar senha.', 'danger');
+          btn.innerHTML = '<i class="bi bi-check-lg"></i> Alterar Senha e Acessar';
+          btn.disabled = false;
+          validate();
+        }
+      } catch (err) {
+        showAlert('Erro de conexão. Tente novamente.', 'danger');
+        btn.innerHTML = '<i class="bi bi-check-lg"></i> Alterar Senha e Acessar';
+        btn.disabled = false;
+        validate();
+      }
+    });
+
+    // Auto-focus
+    document.getElementById('senhaAtual').focus();
+  </script>
+</body>
+</html>

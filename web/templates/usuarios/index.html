@@ -56,6 +56,16 @@
 
 .ur-actions { display: flex; gap: 8px; flex-shrink: 0; }
 
+/* Badge troca pendente */
+.badge-pending-pw {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 99px;
+  font-size: 10.5px; font-weight: 600;
+  background: rgba(245,158,11,0.12); color: #fcd34d;
+  border: 1px solid rgba(245,158,11,0.2);
+  white-space: nowrap;
+}
+
 /* Modal permissions grid */
 .perms-grid {
   display: grid;
@@ -88,6 +98,67 @@
   display: flex; align-items: center; gap: 8px;
   margin-top: 10px;
 }
+
+/* ─── Modal senha gerada ─── */
+.senha-display {
+  background: var(--surface-2);
+  border: 1px solid var(--border-h);
+  border-radius: var(--radius-sm);
+  padding: 16px 18px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0;
+}
+.senha-display code {
+  flex: 1;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 16px;
+  font-weight: 700;
+  color: #fcd34d;
+  letter-spacing: 1.5px;
+  word-break: break-all;
+  user-select: all;
+}
+.senha-display .btn-copy {
+  flex-shrink: 0;
+  background: rgba(124,58,237,0.15);
+  border: 1px solid rgba(124,58,237,0.3);
+  border-radius: 6px;
+  color: var(--primary-l);
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s;
+}
+.senha-display .btn-copy:hover { background: rgba(124,58,237,0.25); }
+
+.senha-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  color: #fca5a5;
+  background: rgba(239,68,68,0.08);
+  border: 1px solid rgba(239,68,68,0.2);
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+.senha-warning i { font-size: 15px; flex-shrink: 0; margin-top: 1px; }
+
+.senha-info {
+  font-size: 12.5px;
+  color: var(--text-m);
+  line-height: 1.5;
+  margin-bottom: 16px;
+}
+.senha-info i { color: var(--primary-l); }
 
 @media (max-width: 768px) {
   .perms-grid { grid-template-columns: 1fr; }
@@ -132,6 +203,10 @@
             <span class="badge badge-danger"><i class="bi bi-circle-fill" style="font-size:6px"></i> Inativo</span>
           {% endif %}
 
+          {% if u.must_change_password %}
+            <span class="badge-pending-pw"><i class="bi bi-key"></i> Troca pendente</span>
+          {% endif %}
+
           {% if not u.is_admin %}
             {% set perms = u.get_perms() %}
             {% if perms %}
@@ -151,6 +226,12 @@
       </div>
 
       <div class="ur-actions">
+        {% if u.id != current_user.id %}
+        <button class="btn btn-ghost btn-sm btn-icon" title="Gerar nova senha temporária"
+          onclick="confirmarResetSenha({{ u.id }}, '{{ u.username }}')">
+          <i class="bi bi-key"></i>
+        </button>
+        {% endif %}
         <button class="btn btn-ghost btn-sm btn-icon" title="Editar"
           onclick="abrirModalEditar(USERS_DATA[{{ u.id }}])">
           <i class="bi bi-pencil"></i>
@@ -183,10 +264,18 @@
       <input type="text" id="inputUsername" placeholder="Ex: joao.silva" autocomplete="off">
     </div>
 
-    <div class="form-group">
-      <label for="inputPassword" id="labelSenha">Senha</label>
-      <input type="password" id="inputPassword" placeholder="Senha do usuário">
+    <!-- Campo de senha só aparece no modo edição (alteração manual) -->
+    <div class="form-group" id="passwordGroup" style="display:none">
+      <label for="inputPassword" id="labelSenha">Nova Senha (opcional)</label>
+      <input type="password" id="inputPassword" placeholder="Deixe em branco para manter a senha atual">
       <div style="font-size:11.5px;color:var(--text-d);margin-top:4px" id="senhaHint"></div>
+    </div>
+
+    <!-- Info sobre senha automática (só no modo criar) -->
+    <div class="senha-info" id="autoSenhaInfo">
+      <i class="bi bi-info-circle"></i>
+      Uma senha segura será gerada automaticamente e exibida após a criação.
+      O usuário será obrigado a alterá-la no primeiro acesso.
     </div>
 
     <!-- Admin toggle -->
@@ -243,6 +332,49 @@
   </div>
 </div>
 
+<!-- ═══ Modal Senha Gerada ═══ -->
+<div class="modal-overlay" id="senhaModal">
+  <div class="modal-box" style="max-width:520px">
+    <div class="modal-header">
+      <span class="modal-title" id="senhaModalTitle">Senha Temporária Gerada</span>
+      <button class="modal-close" onclick="fecharSenhaModal()">&times;</button>
+    </div>
+
+    <div class="senha-warning">
+      <i class="bi bi-exclamation-triangle-fill"></i>
+      <div>
+        <strong>Atenção!</strong> Esta senha será exibida apenas uma vez.
+        Copie ou imprima agora para entregar ao usuário.
+      </div>
+    </div>
+
+    <p style="font-size:13px;color:var(--text-m);margin-bottom:4px">
+      Senha temporária para <strong id="senhaUserLabel" style="color:var(--text)"></strong>:
+    </p>
+
+    <div class="senha-display">
+      <code id="senhaGeradaCode"></code>
+      <button class="btn-copy" id="btnCopiarSenha" onclick="copiarSenha()">
+        <i class="bi bi-clipboard"></i> Copiar
+      </button>
+    </div>
+
+    <div class="senha-info" style="margin-bottom:20px">
+      <i class="bi bi-info-circle"></i>
+      O usuário será obrigado a trocar esta senha no primeiro login.
+    </div>
+
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="imprimirSenha()">
+        <i class="bi bi-printer"></i> Imprimir
+      </button>
+      <button class="btn btn-primary" onclick="fecharSenhaModal()">
+        <i class="bi bi-check-lg"></i> Entendido
+      </button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ Modal Confirmar Exclusão ═══ -->
 <div class="modal-overlay" id="deleteModal">
   <div class="modal-box" style="max-width:440px">
@@ -259,11 +391,29 @@
     </div>
   </div>
 </div>
+
+<!-- ═══ Modal Confirmar Reset Senha ═══ -->
+<div class="modal-overlay" id="resetSenhaModal">
+  <div class="modal-box" style="max-width:480px">
+    <div class="modal-header">
+      <span class="modal-title">Gerar Nova Senha Temporária</span>
+      <button class="modal-close" onclick="fecharResetSenhaModal()">&times;</button>
+    </div>
+    <p id="resetSenhaMsg" style="color:var(--text-m);font-size:13.5px;margin-bottom:24px"></p>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="fecharResetSenhaModal()">Cancelar</button>
+      <button class="btn btn-primary" id="btnConfirmarReset" onclick="executarResetSenha()">
+        <i class="bi bi-key"></i> Gerar Nova Senha
+      </button>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
 let pendingDeleteId = null;
+let pendingResetId = null;
 
 // ─── Abrir modal criar ───
 function abrirModalCriar() {
@@ -271,12 +421,12 @@ function abrirModalCriar() {
   document.getElementById('modalTitle').textContent = 'Novo Usuário';
   document.getElementById('inputUsername').value = '';
   document.getElementById('inputPassword').value = '';
-  document.getElementById('inputPassword').placeholder = 'Senha obrigatória';
-  document.getElementById('labelSenha').textContent = 'Senha';
-  document.getElementById('senhaHint').textContent = '';
   document.getElementById('chkAdmin').checked = false;
   document.getElementById('chkAtivo').checked = true;
   document.querySelectorAll('#permsGrid input[type=checkbox]').forEach(c => c.checked = false);
+  // Modo criar: esconder campo senha manual, mostrar info de senha auto
+  document.getElementById('passwordGroup').style.display = 'none';
+  document.getElementById('autoSenhaInfo').style.display = 'flex';
   toggleAdminMode();
   document.getElementById('userModal').classList.add('show');
   setTimeout(() => document.getElementById('inputUsername').focus(), 100);
@@ -295,7 +445,9 @@ function abrirModalEditar(u) {
   document.getElementById('modalTitle').textContent = `Editar — ${u.username}`;
   document.getElementById('inputUsername').value = u.username;
   document.getElementById('inputPassword').value = '';
-  document.getElementById('inputPassword').placeholder = 'Deixe em branco para manter a senha atual';
+  // Modo editar: mostrar campo senha manual, esconder info de senha auto
+  document.getElementById('passwordGroup').style.display = 'block';
+  document.getElementById('autoSenhaInfo').style.display = 'none';
   document.getElementById('labelSenha').textContent = 'Nova Senha (opcional)';
   document.getElementById('senhaHint').textContent = 'Deixe em branco para não alterar.';
   document.getElementById('chkAdmin').checked = u.is_admin;
@@ -328,36 +480,138 @@ async function salvarUsuario() {
   const permissions = [...document.querySelectorAll('#permsGrid input:checked')].map(c => c.value);
 
   if (!username) { showToast('Informe o nome de usuário.', 'error'); return; }
-  if (!uid && !password) { showToast('Informe a senha para o novo usuário.', 'error'); return; }
 
   const btn = document.getElementById('btnSalvar');
   btn.disabled = true;
 
   let url, method;
+  let body = { username, is_admin, ativo, permissions };
+
   if (uid) {
     url = `/usuarios/api/${uid}`;
     method = 'PUT';
+    if (password) body.password = password;
   } else {
     url = '/usuarios/api';
     method = 'POST';
+    // Senha é gerada automaticamente no backend para novos usuários
   }
 
   try {
     const r = await fetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password, is_admin, ativo, permissions })
+      body: JSON.stringify(body)
     });
     const data = await r.json();
 
     if (r.ok) {
       showToast(data.mensagem, 'success');
       fecharModal();
-      setTimeout(() => location.reload(), 800);
+
+      // Se foi criação e temos senha temporária, exibir modal
+      if (!uid && data.senha_temporaria) {
+        mostrarSenhaGerada(username, data.senha_temporaria);
+      } else {
+        setTimeout(() => location.reload(), 800);
+      }
     } else {
       showToast(data.mensagem || 'Erro ao salvar.', 'error');
     }
   } catch (e) {
+    showToast('Erro de conexão.', 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ─── Modal Senha Gerada ───
+function mostrarSenhaGerada(username, senha, title) {
+  document.getElementById('senhaModalTitle').textContent = title || 'Senha Temporária Gerada';
+  document.getElementById('senhaUserLabel').textContent = username;
+  document.getElementById('senhaGeradaCode').textContent = senha;
+  document.getElementById('btnCopiarSenha').innerHTML = '<i class="bi bi-clipboard"></i> Copiar';
+  document.getElementById('senhaModal').classList.add('show');
+}
+
+function fecharSenhaModal() {
+  document.getElementById('senhaModal').classList.remove('show');
+  location.reload();
+}
+
+async function copiarSenha() {
+  const senha = document.getElementById('senhaGeradaCode').textContent;
+  try {
+    await navigator.clipboard.writeText(senha);
+    const btn = document.getElementById('btnCopiarSenha');
+    btn.innerHTML = '<i class="bi bi-check-lg"></i> Copiada!';
+    setTimeout(() => {
+      btn.innerHTML = '<i class="bi bi-clipboard"></i> Copiar';
+    }, 2000);
+  } catch(e) {
+    showToast('Erro ao copiar. Selecione manualmente.', 'error');
+  }
+}
+
+function imprimirSenha() {
+  const username = document.getElementById('senhaUserLabel').textContent;
+  const senha = document.getElementById('senhaGeradaCode').textContent;
+  const win = window.open('', '_blank', 'width=450,height=350');
+  win.document.write(`
+    <html><head><title>Senha Temporária</title>
+    <style>
+      body { font-family: Arial, sans-serif; padding: 40px; text-align: center; }
+      h2 { margin-bottom: 8px; color: #333; }
+      .user { font-size: 14px; color: #666; margin-bottom: 24px; }
+      .senha { font-family: Consolas, monospace; font-size: 22px; font-weight: bold;
+               letter-spacing: 2px; background: #f0f0f0; padding: 16px 24px;
+               border-radius: 8px; display: inline-block; margin: 16px 0; }
+      .nota { font-size: 12px; color: #999; margin-top: 20px; }
+      .aviso { font-size: 13px; color: #c00; margin-top: 12px; font-weight: bold; }
+    </style></head><body>
+    <h2>🔑 Senha Temporária</h2>
+    <div class="user">Usuário: <strong>${username}</strong></div>
+    <div class="senha">${senha}</div>
+    <div class="aviso">⚠️ Troque esta senha no primeiro acesso!</div>
+    <div class="nota">AutoVerifica — Sistema de Automação SABER<br>Gerado em ${new Date().toLocaleString('pt-BR')}</div>
+    </body></html>
+  `);
+  win.document.close();
+  setTimeout(() => { win.print(); }, 300);
+}
+
+// ─── Reset Senha ───
+function confirmarResetSenha(id, username) {
+  pendingResetId = id;
+  document.getElementById('resetSenhaMsg').innerHTML =
+    `Gerar uma nova senha temporária para <strong style="color:var(--text)">"${username}"</strong>?<br><br>` +
+    `<span style="font-size:12.5px;color:var(--text-d)">A senha atual será substituída e o usuário será obrigado a alterá-la no próximo login.</span>`;
+  document.getElementById('resetSenhaModal').classList.add('show');
+}
+
+function fecharResetSenhaModal() {
+  document.getElementById('resetSenhaModal').classList.remove('show');
+  pendingResetId = null;
+}
+
+async function executarResetSenha() {
+  if (!pendingResetId) return;
+  const btn = document.getElementById('btnConfirmarReset');
+  btn.disabled = true;
+  try {
+    const r = await fetch(`/usuarios/api/${pendingResetId}/reset-senha`, { method: 'POST' });
+    const data = await r.json();
+    if (r.ok) {
+      showToast(data.mensagem, 'success');
+      fecharResetSenhaModal();
+      if (data.senha_temporaria) {
+        const username = data.user ? data.user.username : '';
+        mostrarSenhaGerada(username, data.senha_temporaria, 'Nova Senha Temporária');
+      }
+    } else {
+      showToast(data.mensagem, 'error');
+    }
+  } catch(e) {
     showToast('Erro de conexão.', 'error');
   } finally {
     btn.disabled = false;
@@ -401,5 +655,7 @@ async function executarExcluir() {
 // Fechar modais ao clicar no overlay
 document.getElementById('userModal').addEventListener('click', e => { if (e.target === document.getElementById('userModal')) fecharModal(); });
 document.getElementById('deleteModal').addEventListener('click', e => { if (e.target === document.getElementById('deleteModal')) fecharDeleteModal(); });
+document.getElementById('senhaModal').addEventListener('click', e => { if (e.target === document.getElementById('senhaModal')) fecharSenhaModal(); });
+document.getElementById('resetSenhaModal').addEventListener('click', e => { if (e.target === document.getElementById('resetSenhaModal')) fecharResetSenhaModal(); });
 </script>
 {% endblock %}

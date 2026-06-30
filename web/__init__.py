@@ -1,6 +1,6 @@
 import os
 from datetime import timedelta
-from flask import Flask
+from flask import Flask, redirect, url_for
 from .extensions import db, login_manager, bcrypt
 
 
@@ -76,6 +76,22 @@ def create_app():
         _seed_admin()
         _seed_default_config()
 
+    # ─── Middleware: bloquear acesso enquanto must_change_password=True ────
+    @app.before_request
+    def _force_password_change():
+        from flask import request as req
+        from flask_login import current_user as cu
+        if cu.is_authenticated and getattr(cu, 'must_change_password', False):
+            # Rotas permitidas mesmo com troca pendente
+            allowed = {
+                'auth.forcar_troca_senha',
+                'auth.alterar_senha',
+                'auth.logout',
+                'static',
+            }
+            if req.endpoint and req.endpoint not in allowed:
+                return redirect(url_for('auth.forcar_troca_senha'))
+
     # Handler global: persiste exceções não tratadas no painel de logs
     @app.errorhandler(Exception)
     def handle_unhandled_exception(e):
@@ -112,10 +128,11 @@ def _seed_admin():
             password_hash=bcrypt.generate_password_hash('admin123').decode('utf-8'),
             is_admin=True,
             ativo=True,
+            must_change_password=True,
         )
         db.session.add(admin)
         db.session.commit()
-        print('[SEED] Usuario admin criado -> admin / admin123')
+        print('[SEED] Usuario admin criado -> admin / admin123 (troca obrigatória)')
     else:
         # Garante que o primeiro admin existente seja is_admin=True
         first = User.query.first()
@@ -201,9 +218,11 @@ def _migrate_dedup(db):
 
             # ─── Migrar campos de segurança do User ──────────────────────
             new_cols = [
-                ("ultimo_login",     "DATETIME"),
-                ("tentativas_login", "INTEGER DEFAULT 0 NOT NULL"),
-                ("bloqueado_ate",    "DATETIME"),
+                ("ultimo_login",          "DATETIME"),
+                ("tentativas_login",      "INTEGER DEFAULT 0 NOT NULL"),
+                ("bloqueado_ate",         "DATETIME"),
+                ("must_change_password",  "BOOLEAN DEFAULT 1 NOT NULL"),
+                ("password_changed_at",   "DATETIME"),
             ]
             for col_name, col_def in new_cols:
                 try:

@@ -53,6 +53,10 @@ class User(UserMixin, db.Model):
     tentativas_login = db.Column(db.Integer, default=0, nullable=False)
     bloqueado_ate = db.Column(db.DateTime, nullable=True)
 
+    # Controle de senha temporária / troca obrigatória
+    must_change_password = db.Column(db.Boolean, default=True, nullable=False)
+    password_changed_at = db.Column(db.DateTime, nullable=True)
+
     def has_perm(self, perm):
         """Admin tem todas as permissões. Outros verificam na lista."""
         if self.is_admin:
@@ -101,6 +105,7 @@ class User(UserMixin, db.Model):
             'ativo': self.ativo,
             'permissions': self.get_perms(),
             'ultimo_login': self.ultimo_login.strftime('%d/%m/%Y %H:%M') if self.ultimo_login else 'Nunca',
+            'must_change_password': bool(self.must_change_password),
         }
 
     # Flask-Login: desativar conta impede sessão

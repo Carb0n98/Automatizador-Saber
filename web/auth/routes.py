@@ -1,15 +1,38 @@
 from flask import Blueprint, render_template, redirect, url_for, request, flash, jsonify
 from flask_login import login_user, logout_user, login_required, current_user
+from datetime import datetime, timezone
 from ..models import User
 from ..extensions import db, bcrypt
 from ..logger import log_audit, log_warn
+import re
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
+
+
+def _validar_politica_senha(senha):
+    """
+    Valida política de segurança da senha.
+    Retorna (ok: bool, mensagem: str).
+    """
+    if len(senha) < 12:
+        return False, 'A senha deve ter no mínimo 12 caracteres.'
+    if not re.search(r'[A-Z]', senha):
+        return False, 'A senha deve conter pelo menos uma letra maiúscula.'
+    if not re.search(r'[a-z]', senha):
+        return False, 'A senha deve conter pelo menos uma letra minúscula.'
+    if not re.search(r'[0-9]', senha):
+        return False, 'A senha deve conter pelo menos um número.'
+    if not re.search(r'[!@#$%^&*?_\-+=~`|\\:;"\'<>,./()\[\]{}]', senha):
+        return False, 'A senha deve conter pelo menos um caractere especial (!@#$%&*? etc).'
+    return True, ''
 
 
 @auth_bp.route('/login', methods=['GET', 'POST'])
 def login():
     if current_user.is_authenticated:
+        # Se já logado mas precisa trocar senha, redirecionar para lá
+        if getattr(current_user, 'must_change_password', False):
+            return redirect(url_for('auth.forcar_troca_senha'))
         return redirect(url_for('dashboard.index'))
 
     if request.method == 'POST':
@@ -46,6 +69,10 @@ def login():
                 db.session.commit()
                 login_user(user, remember=True)
                 log_audit(f'Login bem-sucedido: {username}', origem='auth')
+
+                # Verificar se precisa trocar senha obrigatoriamente
+                if user.must_change_password:
+                    return redirect(url_for('auth.forcar_troca_senha'))
 
                 next_page = request.args.get('next')
                 return redirect(next_page or url_for('dashboard.index'))
@@ -84,6 +111,15 @@ def logout():
     return redirect(url_for('auth.login'))
 
 
+@auth_bp.route('/alterar-senha-obrigatoria')
+@login_required
+def forcar_troca_senha():
+    """Tela de troca obrigatória de senha (primeiro acesso)."""
+    if not current_user.must_change_password:
+        return redirect(url_for('dashboard.index'))
+    return render_template('auth/alterar_senha.html')
+
+
 @auth_bp.route('/alterar-senha', methods=['POST'])
 @login_required
 def alterar_senha():
@@ -99,13 +135,35 @@ def alterar_senha():
     if nova_senha != confirmar:
         return jsonify({'status': 'erro', 'mensagem': 'Nova senha e confirmação não coincidem.'}), 400
 
-    if len(nova_senha) < 6:
-        return jsonify({'status': 'erro', 'mensagem': 'A nova senha deve ter no mínimo 6 caracteres.'}), 400
+    # Validar política de segurança
+    ok, msg = _validar_politica_senha(nova_senha)
+    if not ok:
+        return jsonify({'status': 'erro', 'mensagem': msg}), 400
 
+    # Verificar senha atual
     if not bcrypt.check_password_hash(current_user.password_hash, senha_atual):
         return jsonify({'status': 'erro', 'mensagem': 'Senha atual incorreta.'}), 400
 
+    # Impedir reutilização da senha temporária (nova = atual)
+    if bcrypt.check_password_hash(current_user.password_hash, nova_senha):
+        return jsonify({'status': 'erro', 'mensagem': 'A nova senha não pode ser igual à senha atual.'}), 400
+
+    # Atualizar senha
     current_user.password_hash = bcrypt.generate_password_hash(nova_senha).decode('utf-8')
+    current_user.must_change_password = False
+    current_user.password_changed_at = datetime.now(timezone.utc)
     db.session.commit()
-    log_audit(f'Senha alterada pelo próprio usuário: {current_user.username}', origem='auth')
+
+    is_first_change = data.get('is_first_change', False)
+    if is_first_change:
+        log_audit(
+            f'Primeira alteração de senha realizada pelo usuário: {current_user.username}',
+            origem='auth'
+        )
+    else:
+        log_audit(
+            f'Senha alterada pelo próprio usuário: {current_user.username}',
+            origem='auth'
+        )
+
     return jsonify({'status': 'ok', 'mensagem': 'Senha alterada com sucesso.'})
