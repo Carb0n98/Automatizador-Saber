@@ -105,11 +105,22 @@ def index():
     # Sparkline: verificações por dia nos últimos 7 dias úteis do mês
     from sqlalchemy import func, case
     from datetime import timedelta
+
+    DIAS_SEMANA = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom']
+
     sparkline_data = []
     for i in range(6, -1, -1):
         dia = hoje - timedelta(days=i)
         if dia < primeiro_dia or dia > ultimo_dia:
-            sparkline_data.append({'dia': dia.strftime('%d'), 'total': 0, 'verificados': 0})
+            sparkline_data.append({
+                'dia': dia.strftime('%d'),
+                'weekday': DIAS_SEMANA[dia.weekday()],
+                'date': dia.isoformat(),
+                'total': 0,
+                'verificados': 0,
+                'progress': 0,
+                'is_today': dia == hoje,
+            })
             continue
         row = db.session.query(
             func.count(Verificacao.id).label('total'),
@@ -117,10 +128,17 @@ def index():
         ).filter(
             Verificacao.data_verificacao == dia,
         ).first()
+        total_dia = row.total or 0
+        verif_dia = int(row.verificados or 0)
+        pct_dia = int((verif_dia / total_dia) * 100) if total_dia > 0 else 0
         sparkline_data.append({
             'dia': dia.strftime('%d'),
-            'total': row.total or 0,
-            'verificados': int(row.verificados or 0),
+            'weekday': DIAS_SEMANA[dia.weekday()],
+            'date': dia.isoformat(),
+            'total': total_dia,
+            'verificados': verif_dia,
+            'progress': pct_dia,
+            'is_today': dia == hoje,
         })
 
     # Saúde do sistema

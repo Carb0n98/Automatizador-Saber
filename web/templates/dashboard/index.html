@@ -24,46 +24,6 @@
 
 {% block extra_css %}
 <style>
-  .sparkline-container {
-    display: flex;
-    align-items: flex-end;
-    gap: 3px;
-    height: 40px;
-    padding: 4px 0;
-  }
-  .sparkline-bar {
-    flex: 1;
-    min-width: 8px;
-    border-radius: 3px 3px 0 0;
-    transition: height 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
-    position: relative;
-    cursor: pointer;
-  }
-  .sparkline-bar:hover { opacity: 0.85; }
-  .sparkline-bar .spark-tip {
-    display: none;
-    position: absolute;
-    bottom: calc(100% + 6px);
-    left: 50%;
-    transform: translateX(-50%);
-    background: var(--surface-3);
-    border: 1px solid var(--border-h);
-    border-radius: 6px;
-    padding: 4px 8px;
-    font-size: 10px;
-    white-space: nowrap;
-    z-index: 10;
-    color: var(--text);
-  }
-  .sparkline-bar:hover .spark-tip { display: block; }
-  .sparkline-labels {
-    display: flex;
-    justify-content: space-between;
-    font-size: 9px;
-    color: var(--text-d);
-    padding-top: 4px;
-  }
-
   /* Counter animation */
   .stat-value { transition: color 0.3s; }
 
@@ -71,7 +31,7 @@
   .progress-ring {
     width: 80px;
     height: 80px;
-    margin: 0 auto;
+    flex-shrink: 0;
   }
   .progress-ring circle {
     fill: none;
@@ -96,6 +56,213 @@
     text-transform: uppercase;
     letter-spacing: 0.5px;
   }
+
+  /* ─── Vertical Bar Chart ─── */
+  .vbar-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+
+  .vbar-chart-area {
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: var(--surface-3) transparent;
+  }
+  .vbar-chart-area::-webkit-scrollbar { height: 4px; }
+  .vbar-chart-area::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 99px; }
+
+  .vbar-inner {
+    display: flex;
+    position: relative;
+    min-width: fit-content;
+  }
+
+  /* Y-axis scale */
+  .vbar-y-axis {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    height: 200px;
+    padding-right: 8px;
+    flex-shrink: 0;
+  }
+  .vbar-y-label {
+    font-size: 10px;
+    color: var(--text-d);
+    text-align: right;
+    line-height: 1;
+  }
+
+  /* Grid lines */
+  .vbar-grid {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 200px;
+    pointer-events: none;
+  }
+  .vbar-grid-line {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: var(--border);
+  }
+
+  /* Bars container */
+  .vbar-bars {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    height: 200px;
+    padding: 0 4px;
+    position: relative;
+  }
+
+  /* Single bar column */
+  .vbar-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    min-width: 28px;
+    flex-shrink: 0;
+    position: relative;
+  }
+
+  /* Percentage label above bar */
+  .vbar-pct {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-m);
+    margin-bottom: 4px;
+    white-space: nowrap;
+    transition: color 0.2s;
+  }
+  .vbar-col:hover .vbar-pct { color: var(--primary-l); }
+  .vbar-col.is-today .vbar-pct { color: var(--primary-l); }
+  .vbar-col.is-best .vbar-pct { color: var(--success); }
+
+  /* The bar itself */
+  .vbar-bar-wrap {
+    width: 28px;
+    height: 200px;
+    display: flex;
+    align-items: flex-end;
+    position: relative;
+  }
+
+  .vbar-bar {
+    width: 100%;
+    min-height: 3px;
+    border-radius: 4px 4px 2px 2px;
+    background: linear-gradient(to top, var(--primary-d), var(--primary-l));
+    position: relative;
+    cursor: pointer;
+    transition: height 0.8s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.2s, box-shadow 0.2s;
+  }
+  .vbar-bar:hover {
+    filter: brightness(1.2);
+    box-shadow: 0 0 16px rgba(124,58,237,0.4);
+  }
+
+  /* Today highlight */
+  .vbar-col.is-today .vbar-bar {
+    background: linear-gradient(to top, #4f46e5, #a78bfa);
+    box-shadow: 0 0 12px rgba(124,58,237,0.35);
+  }
+
+  /* Best day highlight */
+  .vbar-col.is-best .vbar-bar {
+    background: linear-gradient(to top, #059669, #34d399);
+  }
+  .vbar-col.is-best .vbar-bar:hover {
+    box-shadow: 0 0 16px rgba(16,185,129,0.4);
+  }
+
+  /* Zero bar */
+  .vbar-bar.zero {
+    background: var(--surface-3);
+    min-height: 3px;
+  }
+
+  /* Tooltip */
+  .vbar-tooltip {
+    display: none;
+    position: absolute;
+    bottom: calc(100% + 10px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--surface-3);
+    border: 1px solid var(--border-h);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 11.5px;
+    white-space: nowrap;
+    z-index: 20;
+    color: var(--text);
+    box-shadow: var(--shadow);
+    pointer-events: none;
+  }
+  .vbar-tooltip::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 5px solid transparent;
+    border-top-color: var(--surface-3);
+  }
+  .vbar-bar:hover .vbar-tooltip { display: block; }
+  .vbar-tt-row { display: flex; align-items: center; gap: 6px; margin-top: 3px; }
+  .vbar-tt-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+  /* Day labels below bar */
+  .vbar-day-num {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-m);
+    margin-top: 6px;
+    transition: color 0.2s;
+  }
+  .vbar-col.is-today .vbar-day-num { color: var(--primary-l); }
+
+  .vbar-weekday {
+    font-size: 9px;
+    color: var(--text-d);
+    text-transform: capitalize;
+    transition: color 0.2s;
+  }
+  .vbar-col.is-today .vbar-weekday { color: var(--primary-l); }
+
+  /* Today dot indicator */
+  .vbar-today-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--primary-l);
+    margin-top: 4px;
+    animation: todayPulse 2s ease-in-out infinite;
+  }
+  @keyframes todayPulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(1.3); }
+  }
+
+  /* Trend indicator */
+  .vbar-trend {
+    font-size: 10px;
+    font-weight: 700;
+    margin-left: 2px;
+  }
+  .vbar-trend.up { color: var(--success); }
+  .vbar-trend.down { color: var(--danger); }
+  .vbar-trend.stable { color: var(--text-d); }
 
   /* Health badge */
   .health-badge {
@@ -142,6 +309,15 @@
     margin-bottom: 4px;
   }
   .sch-value { font-size: 14px; font-weight: 600; }
+
+  @media (max-width: 900px) {
+    .vbar-bar-wrap { width: 22px; height: 160px; }
+    .vbar-bars { height: 160px; gap: 6px; }
+    .vbar-y-axis { height: 160px; }
+    .vbar-grid { height: 160px; }
+    .vbar-wrapper { flex-direction: column; align-items: stretch; gap: 16px; }
+    .progress-ring { margin: 0; }
+  }
 </style>
 {% endblock %}
 
@@ -190,28 +366,39 @@
   <!-- Left Column -->
   <div style="display:flex;flex-direction:column;gap:20px;">
 
-    <!-- Progress + Sparkline Card -->
+    <!-- Progress + Vertical Bar Chart Card -->
     <div class="card">
       <div class="card-header">
         <span class="card-title"><i class="bi bi-graph-up" style="color:var(--primary-l);margin-right:6px;"></i> Progresso do Mês</span>
         <span class="badge badge-purple" id="progPct">{{ progresso_pct }}%</span>
       </div>
-      <div style="display:flex;align-items:center;gap:24px;">
+      <div class="vbar-wrapper">
         <!-- Progress Ring -->
-        <svg class="progress-ring" viewBox="0 0 80 80">
-          <circle class="bg" cx="40" cy="40" r="34"/>
-          <circle class="fg" id="progressArc" cx="40" cy="40" r="34"
-                  stroke-dasharray="213.6"
-                  stroke-dashoffset="213.6"/>
-          <text class="progress-text" x="40" y="43" text-anchor="middle" id="progressText">0%</text>
-          <text class="progress-sub" x="40" y="54" text-anchor="middle">completo</text>
-        </svg>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:8px;flex-shrink:0;">
+          <svg class="progress-ring" viewBox="0 0 80 80">
+            <circle class="bg" cx="40" cy="40" r="34"/>
+            <circle class="fg" id="progressArc" cx="40" cy="40" r="34"
+                    stroke-dasharray="213.6"
+                    stroke-dashoffset="213.6"/>
+            <text class="progress-text" x="40" y="43" text-anchor="middle" id="progressText">0%</text>
+            <text class="progress-sub" x="40" y="54" text-anchor="middle">completo</text>
+          </svg>
+          <div style="font-size:10px;color:var(--text-d);text-align:center;">Últimos 7 dias</div>
+        </div>
 
-        <!-- Sparkline -->
-        <div style="flex:1;">
-          <div style="font-size:11px;color:var(--text-m);margin-bottom:6px;">Últimos 7 dias</div>
-          <div class="sparkline-container" id="sparkline"></div>
-          <div class="sparkline-labels" id="sparkLabels"></div>
+        <!-- Vertical Bar Chart -->
+        <div class="vbar-chart-area">
+          <div class="vbar-inner">
+            <!-- Y-axis -->
+            <div class="vbar-y-axis" id="vbarYAxis"></div>
+            <!-- Chart body -->
+            <div style="flex:1;position:relative;">
+              <div class="vbar-grid" id="vbarGrid"></div>
+              <div class="vbar-bars" id="vbarBars"></div>
+            </div>
+          </div>
+          <!-- Day labels -->
+          <div style="display:flex;gap:8px;padding-left:32px;margin-top:0;" id="vbarLabels"></div>
         </div>
       </div>
     </div>
@@ -360,36 +547,109 @@ function animateProgress() {
   }, 300);
 }
 
-// ─── Sparkline ───
-function renderSparkline() {
+// ─── Vertical Bar Chart ───
+function renderVerticalBars() {
   const data = {{ sparkline_data | tojson }};
-  const container = document.getElementById('sparkline');
-  const labels = document.getElementById('sparkLabels');
-  if (!container || !data.length) return;
+  const barsContainer = document.getElementById('vbarBars');
+  const labelsContainer = document.getElementById('vbarLabels');
+  const yAxis = document.getElementById('vbarYAxis');
+  const grid = document.getElementById('vbarGrid');
+  if (!barsContainer || !data.length) return;
 
-  const maxVal = Math.max(...data.map(d => d.total), 1);
-  container.innerHTML = '';
-  labels.innerHTML = '';
+  // Y-axis scale labels
+  const scaleValues = [100, 75, 50, 25, 0];
+  yAxis.innerHTML = scaleValues.map(v =>
+    `<span class="vbar-y-label">${v}%</span>`
+  ).join('');
+
+  // Grid lines
+  grid.innerHTML = scaleValues.map(v => {
+    const topPct = 100 - v;
+    return `<div class="vbar-grid-line" style="top:${topPct}%"></div>`;
+  }).join('');
+
+  // Find best day
+  const maxProgress = Math.max(...data.map(d => d.progress));
+  const bestIdx = maxProgress > 0 ? data.findIndex(d => d.progress === maxProgress) : -1;
+
+  // Build bars
+  barsContainer.innerHTML = '';
+  labelsContainer.innerHTML = '';
 
   data.forEach((d, i) => {
-    const h = Math.max(4, (d.total / maxVal) * 36);
-    const hv = Math.max(0, (d.verificados / maxVal) * 36);
+    const col = document.createElement('div');
+    col.className = 'vbar-col';
+    if (d.is_today) col.classList.add('is-today');
+    if (i === bestIdx && maxProgress > 0) col.classList.add('is-best');
+
+    // Trend indicator
+    let trendHtml = '';
+    if (i > 0) {
+      const prev = data[i - 1].progress;
+      const diff = d.progress - prev;
+      if (diff > 0) trendHtml = '<span class="vbar-trend up">↑</span>';
+      else if (diff < 0) trendHtml = '<span class="vbar-trend down">↓</span>';
+      else trendHtml = '<span class="vbar-trend stable">→</span>';
+    }
+
+    // Percentage label
+    const pctLabel = document.createElement('div');
+    pctLabel.className = 'vbar-pct';
+    pctLabel.innerHTML = `${d.progress}%${trendHtml}`;
+
+    // Bar wrapper
+    const barWrap = document.createElement('div');
+    barWrap.className = 'vbar-bar-wrap';
+
     const bar = document.createElement('div');
-    bar.className = 'sparkline-bar';
+    bar.className = 'vbar-bar' + (d.progress === 0 ? ' zero' : '');
     bar.style.height = '0px';
-    bar.style.background = d.verificados > 0
-      ? `linear-gradient(to top, var(--success) ${(hv/h*100).toFixed(0)}%, var(--primary) ${(hv/h*100).toFixed(0)}%)`
-      : 'var(--primary)';
-    bar.innerHTML = `<div class="spark-tip">Dia ${d.dia}: ${d.total} total, ${d.verificados} verificados</div>`;
-    container.appendChild(bar);
 
-    // Animate
-    setTimeout(() => { bar.style.height = h + 'px'; }, 100 + i * 80);
+    // Format date for tooltip
+    const dateParts = d.date.split('-');
+    const dateFormatted = `${dateParts[2]}/${dateParts[1]}/${dateParts[0]}`;
 
-    // Label
-    const lbl = document.createElement('span');
-    lbl.textContent = d.dia;
-    labels.appendChild(lbl);
+    // Tooltip
+    bar.innerHTML = `
+      <div class="vbar-tooltip">
+        <div style="font-weight:700;margin-bottom:4px;">${dateFormatted} (${d.weekday})</div>
+        <div class="vbar-tt-row">
+          <span class="vbar-tt-dot" style="background:var(--primary-l);"></span>
+          Progresso: <strong>${d.progress}%</strong>
+        </div>
+        <div class="vbar-tt-row">
+          <span class="vbar-tt-dot" style="background:var(--success);"></span>
+          Concluídos: <strong>${d.verificados}</strong>
+        </div>
+        <div class="vbar-tt-row">
+          <span class="vbar-tt-dot" style="background:var(--text-d);"></span>
+          Total: <strong>${d.total}</strong>
+        </div>
+      </div>
+    `;
+
+    barWrap.appendChild(bar);
+
+    col.appendChild(pctLabel);
+    col.appendChild(barWrap);
+
+    barsContainer.appendChild(col);
+
+    // Labels below
+    const labelCol = document.createElement('div');
+    labelCol.style.cssText = 'display:flex;flex-direction:column;align-items:center;min-width:28px;flex-shrink:0;';
+    labelCol.innerHTML = `
+      <span class="vbar-day-num${d.is_today ? '" style="color:var(--primary-l)' : ''}">${d.dia}</span>
+      <span class="vbar-weekday${d.is_today ? '" style="color:var(--primary-l)' : ''}">${d.weekday}</span>
+      ${d.is_today ? '<div class="vbar-today-dot"></div>' : ''}
+    `;
+    labelsContainer.appendChild(labelCol);
+
+    // Animate bar growth
+    const targetH = d.progress === 0 ? 3 : (d.progress / 100) * 200;
+    setTimeout(() => {
+      bar.style.height = targetH + 'px';
+    }, 200 + i * 100);
   });
 }
 
@@ -470,7 +730,7 @@ function mudarMes(val) {
 document.addEventListener('DOMContentLoaded', () => {
   animateCounters();
   animateProgress();
-  renderSparkline();
+  renderVerticalBars();
   updateClock();
   setInterval(updateClock, 1000);
 });
